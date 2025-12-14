@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ProtocolFramework.Core/ProtocolFramework.Core.csproj" />
+    <Project Path="src/ProtocolFramework.Host/ProtocolFramework.Host.csproj" />
+    <Project Path="src/WebGameHost.ConsoleClient/WebGameHost.ConsoleClient.csproj" />
+    <Project Path="src/WebGameHost.Core/WebGameHost.Core.csproj" />
+    <Project Path="src/WebGameHost/WebGameHost.csproj" />
+  </Folder>
+</Solution>

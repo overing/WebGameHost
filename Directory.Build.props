@@ -1,0 +1,12 @@
+<Project>
+    <PropertyGroup>
+      <UseArtifactsOutput>true</UseArtifactsOutput>
+      <ArtifactsPath>$(MSBuildThisFileDirectory)artifacts</ArtifactsPath>
+    </PropertyGroup>
+
+    <PropertyGroup>
+      <AnalysisMode>All</AnalysisMode>
+      <EnforceCodeStyleInBuild>True</EnforceCodeStyleInBuild>
+      <EnableNETAnalyzers>True</EnableNETAnalyzers>
+    </PropertyGroup>
+  </Project>
