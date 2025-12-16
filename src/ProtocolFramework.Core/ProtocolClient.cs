@@ -13,7 +13,7 @@ public sealed class ProtocolClient(
     private readonly ILogger _logger = logger;
     private readonly IProtocolConnection _connection = connection;
     private readonly ProtocolSession _session = new(connection);
-    private readonly ProtocolConnectionProcessor _processor = new ProtocolConnectionProcessor(route);
+    private readonly ProtocolConnectionProcessor _processor = new(route);
     private Task? _receiveTask;
     private CancellationTokenSource? _cts;
 
@@ -36,7 +36,7 @@ public sealed class ProtocolClient(
             }
             catch (Exception ex)
             {
-                logger.LogError($"Receive error: {ex.Message}");
+                _logger.LogError($"Receive error: {ex.Message}");
             }
         });
     }
@@ -66,18 +66,29 @@ public sealed class ProtocolClient(
         int port,
         Action<ProtocolRouteBuilder> routeConfig)
     {
-        var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-        await socket.ConnectAsync(address, port);
+        var socket = default(Socket?);
 
-        var connection = new SocketProtocolConnection(socket);
+        try
+        {
+            socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+            await socket.ConnectAsync(address, port);
 
-        var builder = new ProtocolRouteBuilder();
-        routeConfig(builder);
+            var connection = new SocketProtocolConnection(socket);
 
-        var logger = loggerFactory.CreateLogger<ProtocolClient>();
-        var client = new ProtocolClient(logger, connection, builder.Build());
-        client.StartReceiving();
+            var builder = new ProtocolRouteBuilder();
+            routeConfig(builder);
 
-        return client;
+            var logger = loggerFactory.CreateLogger<ProtocolClient>();
+            var client = new ProtocolClient(logger, connection, builder.Build());
+            client.StartReceiving();
+
+            return client;
+        }
+        catch
+        {
+            socket?.Dispose();
+
+            throw;
+        }
     }
 }

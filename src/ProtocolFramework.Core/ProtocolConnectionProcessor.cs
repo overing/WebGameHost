@@ -1,6 +1,5 @@
 
 using System.Buffers;
-using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace ProtocolFramework.Core;
@@ -10,6 +9,8 @@ namespace ProtocolFramework.Core;
 /// </summary>
 public sealed class ProtocolConnectionProcessor(ProtocolRoute route)
 {
+    private const int MaxPacketSize = 10 * 1024 * 1024;
+
     private readonly ProtocolRoute _route = route;
 
     /// <summary>
@@ -58,7 +59,7 @@ public sealed class ProtocolConnectionProcessor(ProtocolRoute route)
         buffer.Slice(0, sizeof(int)).CopyTo(lengthBytes);
         var length = BitConverter.ToInt32(lengthBytes);
 
-        if (length <= 0 || length > 10 * 1024 * 1024)
+        if (length <= 0 || length > MaxPacketSize)
             throw new InvalidDataException($"Invalid packet length: {length}");
 
         var totalLength = sizeof(int) + length;
