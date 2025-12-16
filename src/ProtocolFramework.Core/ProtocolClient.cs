@@ -1,10 +1,16 @@
 
 using System.Net.Sockets;
+using Microsoft.Extensions.Logging;
 
 namespace ProtocolFramework.Core;
 
-public sealed class ProtocolClient(IProtocolConnection connection, ProtocolRoute route) : IDisposable
+public sealed class ProtocolClient(
+    ILogger<ProtocolClient> logger,
+    IProtocolConnection connection,
+    ProtocolRoute route)
+    : IDisposable
 {
+    private readonly ILogger _logger = logger;
     private readonly IProtocolConnection _connection = connection;
     private readonly ProtocolSession _session = new(connection);
     private readonly ProtocolConnectionProcessor _processor = new ProtocolConnectionProcessor(route);
@@ -23,14 +29,14 @@ public sealed class ProtocolClient(IProtocolConnection connection, ProtocolRoute
             {
                 // 客戶端和伺服器使用完全相同的邏輯！
                 await _processor.ProcessPacketsAsync(
-                    _connection,  // IProtocolReader
+                    _connection,
                     _session,
-                    serviceProvider: null,
+                    serviceScopeFactory: null,
                     _cts.Token);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Receive error: {ex.Message}");
+                logger.LogError($"Receive error: {ex.Message}");
             }
         });
     }
@@ -55,20 +61,21 @@ public sealed class ProtocolClient(IProtocolConnection connection, ProtocolRoute
     }
 
     public static async Task<ProtocolClient> ConnectAsync(
+        ILoggerFactory loggerFactory,
         string address,
         int port,
-        Action<ProtocolRouteBuilder> routeConfig,
-        CancellationToken cancellationToken = default)
+        Action<ProtocolRouteBuilder> routeConfig)
     {
         var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-        await socket.ConnectAsync("127.0.0.1", 5100);
+        await socket.ConnectAsync(address, port);
 
         var connection = new SocketProtocolConnection(socket);
 
         var builder = new ProtocolRouteBuilder();
         routeConfig(builder);
 
-        var client = new ProtocolClient(connection, builder.Build());
+        var logger = loggerFactory.CreateLogger<ProtocolClient>();
+        var client = new ProtocolClient(logger, connection, builder.Build());
         client.StartReceiving();
 
         return client;

@@ -12,7 +12,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\ProtocolFramework.Host\ProtocolFramework.Host.csproj" />
-    <ProjectReference Include="..\WebGameHost.Core\WebGameHost.Core.csproj" />
+    <ProjectReference Include="..\WebGame.Core\WebGame.Core.csproj" />
   </ItemGroup>
 
 </Project>

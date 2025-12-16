@@ -31,10 +31,8 @@ internal sealed class AspNetCoreProtocolConnectionHandler(
             var ct = connection.Features.Get<IConnectionLifetimeFeature>()?.ConnectionClosed
                 ?? CancellationToken.None;
 
-            using var scope = _serviceScopeFactory.CreateScope();
-
             await _processor
-                .ProcessPacketsAsync(protocolConnection, session, scope.ServiceProvider, ct)
+                .ProcessPacketsAsync(protocolConnection, session, _serviceScopeFactory, ct)
                 .ConfigureAwait(ConfigureAwaitOptions.None);
         }
         catch (ConnectionResetException)

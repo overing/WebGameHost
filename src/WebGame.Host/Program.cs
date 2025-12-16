@@ -1,7 +1,7 @@
 
 using ProtocolFramework.Core;
 using ProtocolFramework.Host;
-using WebGameHost.Core.Protocols;
+using WebGame.Core.Protocols;
 
 var appBuilder = WebApplication.CreateBuilder(args);
 

@@ -1,6 +1,7 @@
 
 using System.Buffers;
 using System.Diagnostics;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace ProtocolFramework.Core;
 
@@ -17,7 +18,7 @@ public sealed class ProtocolConnectionProcessor(ProtocolRoute route)
     public async Task ProcessPacketsAsync(
         IProtocolReader reader,
         IProtocolSession session,
-        IServiceProvider? serviceProvider = null,
+        IServiceScopeFactory? serviceScopeFactory = null,
         CancellationToken cancellationToken = default)
     {
         while (!cancellationToken.IsCancellationRequested)
@@ -27,9 +28,10 @@ public sealed class ProtocolConnectionProcessor(ProtocolRoute route)
 
             while (TryReadPacket(ref buffer, out var packetData))
             {
+                using var scope = serviceScopeFactory?.CreateScope();
                 try
                 {
-                    await _route.InvokeAsync(packetData, session, serviceProvider, cancellationToken);
+                    await _route.InvokeAsync(packetData, session, scope?.ServiceProvider, cancellationToken);
                 }
                 catch (Exception)
                 {

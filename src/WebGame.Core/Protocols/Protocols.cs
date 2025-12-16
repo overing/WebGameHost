@@ -1,5 +1,5 @@
 ﻿
-namespace WebGameHost.Core.Protocols;
+namespace WebGame.Core.Protocols;
 
 public sealed record class LoginRequest(string Account, string Password);
 
