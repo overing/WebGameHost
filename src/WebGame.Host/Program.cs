@@ -37,7 +37,6 @@ app.MapProtocol(async (IProtocolSession session, LoginRequest request) =>
 
 app.MapProtocol(async (IProtocolSession session, EchoRequest request) =>
 {
-    await Task.Yield();
     await session.SendAsync(new EchoResponse());
 });
 

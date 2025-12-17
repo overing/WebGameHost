@@ -80,14 +80,21 @@ internal sealed class MainService(
 
     private void BindProtocolHandle(ProtocolRouteBuilder routeBuilder)
     {
-        routeBuilder.MapProtocol(HandleAsync);
+        routeBuilder.MapProtocol(HandleLoginResponseAsync);
+        routeBuilder.MapProtocol(HandleEchoResponseAsync);
     }
 
-    private Task HandleAsync(LoginResponse response)
+    private Task HandleLoginResponseAsync(LoginResponse response)
     {
         _logger.LogLogin(LogLevel.Information, response.Success);
         _login!.SetResult(response.Success);
         return Task.CompletedTask;
+    }
+
+    private async Task HandleEchoResponseAsync(IProtocolSession session, EchoResponse _, CancellationToken cancellationToken)
+    {
+        await Task.Delay(1000, cancellationToken);
+        await session.SendAsync(new EchoRequest(), cancellationToken);
     }
 
     public override async Task StopAsync(CancellationToken cancellationToken)
