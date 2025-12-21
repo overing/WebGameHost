@@ -15,6 +15,14 @@ internal sealed record class PacketWithType
     }
 }
 
+public interface IProtocolSession
+{
+    string SessionId { get; }
+    Task SendAsync<TPacket>(TPacket packet, CancellationToken cancellationToken = default);
+    ValueTask CloseAsync();
+    IDictionary<string, object> Properties { get; }
+}
+
 public sealed class ProtocolSession(IProtocolConnection connection) : IProtocolSession, IDisposable
 {
     private readonly IProtocolConnection _connection = connection;

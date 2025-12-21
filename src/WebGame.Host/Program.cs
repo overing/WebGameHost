@@ -10,7 +10,7 @@ appBuilder.Logging.ClearProviders()
 
 appBuilder.Services.AddOpenApi();
 
-appBuilder.AddProtocolFramework();
+appBuilder.AddAspNetCoreProtocolHost();
 
 var app = appBuilder.Build();
 
@@ -28,16 +28,26 @@ app.MapGet("/", (HttpContext httpContext) => TypedResults.Ok(new
     httpContext.Request.Protocol,
 }));
 
-app.MapProtocol(async (IProtocolSession session, LoginRequest request) =>
+app.MapProtocol(async (IProtocolSession session, LoginRequest request, ILogger<Program> logger) =>
 {
+    logger.LogLogin(LogLevel.Information, request);
     await Task.Yield();
     var response = new LoginResponse(request.Account == "overing" && request.Password == "abc123");
     await session.SendAsync(response);
 });
 
-app.MapProtocol(async (IProtocolSession session, EchoRequest request) =>
+app.MapProtocol(async (IProtocolSession session, EchoRequest request, ILogger<Program> logger) =>
 {
+    logger.LogEcho(LogLevel.Information);
     await session.SendAsync(new EchoResponse());
 });
 
 await app.RunAsync();
+
+internal static partial class ProgramLoggerExtensions
+{
+    [LoggerMessage("Login: {Request}")]
+    public static partial void LogLogin(this ILogger logger, LogLevel logLevel, LoginRequest request);
+    [LoggerMessage("Echo")]
+    public static partial void LogEcho(this ILogger logger, LogLevel logLevel);
+}

@@ -16,18 +16,43 @@ appBuilder.Logging.ClearProviders()
     .AddSimpleConsole();
 
 appBuilder.Services
-    .AddHostedService<MainService>()
-    .AddOptions<MainServiceOptions>()
-    .Configure(appBuilder.Configuration.GetSection(nameof(MainServiceOptions)).Bind)
+    .AddOptions<ProgramOptions>()
+    .Configure(appBuilder.Configuration.GetSection(nameof(ProgramOptions)).Bind)
     .ValidateDataAnnotations()
     .ValidateOnStart();
 
+appBuilder.Services.AddProtocolCore();
+
 var app = appBuilder.Build();
+
+var routeBuilder = app.Services.GetRequiredService<IProtocolRouteBuilder>();
+
+routeBuilder.MapProtocol(async (IProtocolSession session, LoginResponse response, ILogger<Program> logger, CancellationToken cancellationToken) =>
+{
+    logger.LogLogin(LogLevel.Information, response.Success);
+    await Task.Delay(1000, cancellationToken);
+    await session.SendAsync(new EchoRequest(), cancellationToken);
+});
+
+routeBuilder.MapProtocol(async (IProtocolSession session, EchoResponse _, ILogger<Program> logger, CancellationToken cancellationToken) =>
+{
+    logger.LogEcho(LogLevel.Information);
+    await Task.Delay(1000, cancellationToken);
+    await session.SendAsync(new EchoRequest(), cancellationToken);
+});
+
+app.Services.GetRequiredService<IHostApplicationLifetime>().ApplicationStarted.Register(async () =>
+{
+    var clientFactory = app.Services.GetRequiredService<IProtocolClientFactory>();
+    var options = app.Services.GetRequiredService<IOptions<ProgramOptions>>().Value;
+    var client = await clientFactory.ConnectAsync(options.Host, options.Port);
+    await client.SendAsync(new LoginRequest("overing", "abc123"));
+});
 
 await app.RunAsync();
 
 [SuppressMessage("Performance", "CA1812", Justification = "這個類別透過 DI 建立")]
-internal sealed record class MainServiceOptions
+internal sealed record class ProgramOptions
 {
     [HostAddress]
     [Required(ErrorMessage = "為必要項目")]
@@ -38,82 +63,12 @@ internal sealed record class MainServiceOptions
     public required int Port { get; init; }
 }
 
-[SuppressMessage("Performance", "CA1812", Justification = "這個類別透過 DI 建立")]
-internal sealed class MainService(
-    ILogger<MainService> logger,
-    ILoggerFactory loggerFactory,
-    IOptions<MainServiceOptions> options)
-    : BackgroundService
-{
-    private readonly MainServiceOptions _options = options.Value;
-    private readonly ILoggerFactory _loggerFactory = loggerFactory;
-    private readonly ILogger _logger = logger;
-
-    private ProtocolClient? _client;
-
-    private TaskCompletionSource<bool>? _login;
-
-    public override async Task StartAsync(CancellationToken cancellationToken)
-    {
-        _client = await ProtocolClient.ConnectAsync(_loggerFactory, _options.Host, _options.Port, BindProtocolHandle);
-        await base.StartAsync(cancellationToken);
-    }
-
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        if (_client is not { } client)
-            return;
-
-        _login = new TaskCompletionSource<bool>();
-        await client.SendAsync(new LoginRequest("overing", "abc123"), stoppingToken);
-
-        if (await _login.Task)
-        {
-            while (!stoppingToken.IsCancellationRequested)
-            {
-                await Task.Delay(1000, stoppingToken);
-
-                await client.SendAsync(new EchoRequest(), stoppingToken);
-            }
-        }
-    }
-
-    private void BindProtocolHandle(ProtocolRouteBuilder routeBuilder)
-    {
-        routeBuilder.MapProtocol(HandleLoginResponseAsync);
-        routeBuilder.MapProtocol(HandleEchoResponseAsync);
-    }
-
-    private Task HandleLoginResponseAsync(LoginResponse response)
-    {
-        _logger.LogLogin(LogLevel.Information, response.Success);
-        _login!.SetResult(response.Success);
-        return Task.CompletedTask;
-    }
-
-    private async Task HandleEchoResponseAsync(IProtocolSession session, EchoResponse _, CancellationToken cancellationToken)
-    {
-        await Task.Delay(1000, cancellationToken);
-        await session.SendAsync(new EchoRequest(), cancellationToken);
-    }
-
-    public override async Task StopAsync(CancellationToken cancellationToken)
-    {
-        if (_client is { } client)
-            await client.DisconnectAsync();
-    }
-
-    public override void Dispose()
-    {
-        _loggerFactory.Dispose();
-        base.Dispose();
-    }
-}
-
-internal static partial class MainServiceLoggerExtensions
+internal static partial class ProgramLoggerExtensions
 {
     [LoggerMessage("Login: {Result}")]
     public static partial void LogLogin(this ILogger logger, LogLevel logLevel, bool result);
+    [LoggerMessage("Echo")]
+    public static partial void LogEcho(this ILogger logger, LogLevel logLevel);
 }
 
 [AttributeUsage(AttributeTargets.Property | AttributeTargets.Field)]

@@ -10,9 +10,9 @@ namespace ProtocolFramework.Host;
 
 [SuppressMessage("Performance", "CA1812", Justification = "這個類別透過 DI 建立")]
 internal sealed class AspNetCoreProtocolConnectionHandler(
-    ProtocolRouteBuilder routeBuilder,
-    IServiceScopeFactory serviceScopeFactory,
-    ILogger<AspNetCoreProtocolConnectionHandler> logger) : ConnectionHandler
+    ILogger<AspNetCoreProtocolConnectionHandler> logger,
+    IProtocolRouteBuilder routeBuilder,
+    IServiceScopeFactory serviceScopeFactory) : ConnectionHandler
 {
     private readonly ProtocolConnectionProcessor _processor = new(routeBuilder.Build());
     private readonly IServiceScopeFactory _serviceScopeFactory = serviceScopeFactory;

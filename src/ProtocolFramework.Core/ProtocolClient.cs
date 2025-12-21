@@ -1,50 +1,62 @@
 
-using System.Net.Sockets;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace ProtocolFramework.Core;
 
-public sealed class ProtocolClient(
+public interface IProtocolClient : IDisposable
+{
+    /// <summary>
+    /// 開始接收 - 使用相同的處理器
+    /// </summary>
+    void StartProcessReceive(CancellationToken cancellationToken = default);
+    Task SendAsync<TPacket>(TPacket packet, CancellationToken cancellationToken = default);
+    Task DisconnectAsync();
+}
+
+internal sealed class ProtocolClient(
     ILogger<ProtocolClient> logger,
+    IServiceScopeFactory serviceScopeFactory,
     IProtocolConnection connection,
     ProtocolRoute route)
-    : IDisposable
+    : IProtocolClient
 {
     private readonly ILogger _logger = logger;
+    private readonly IServiceScopeFactory _serviceScopeFactory = serviceScopeFactory;
     private readonly IProtocolConnection _connection = connection;
     private readonly ProtocolSession _session = new(connection);
     private readonly ProtocolConnectionProcessor _processor = new(route);
     private Task? _receiveTask;
     private CancellationTokenSource? _cts;
 
-    /// <summary>
-    /// 開始接收 - 使用相同的處理器
-    /// </summary>
-    public void StartReceiving()
+    public void StartProcessReceive(CancellationToken cancellationToken = default)
     {
-        _cts = new CancellationTokenSource();
-        _receiveTask = Task.Run(async () =>
-        {
-            try
-            {
-                // 客戶端和伺服器使用完全相同的邏輯！
-                await _processor.ProcessPacketsAsync(
-                    _connection,
-                    _session,
-                    serviceScopeFactory: null,
-                    _cts.Token);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError($"Receive error: {ex.Message}");
-            }
-        });
+        if (_receiveTask != null)
+            throw new InvalidOperationException("已啟動");
+
+        _receiveTask = ProcessReceiveAsync(cancellationToken);
     }
 
-    public Task SendAsync<TPacket>(TPacket packet, CancellationToken ct = default)
+    private async Task ProcessReceiveAsync(CancellationToken cancellationToken = default)
     {
-        return _session.SendAsync(packet, ct);
+        _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        try
+        {
+            // 客戶端和伺服器使用完全相同的邏輯！
+            await _processor.ProcessPacketsAsync(
+                _connection,
+                _session,
+                _serviceScopeFactory,
+                _cts.Token);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogReceiveError(LogLevel.Error, ex);
+        }
     }
+
+    public Task SendAsync<TPacket>(TPacket packet, CancellationToken cancellationToken = default)
+        => _session.SendAsync(packet, cancellationToken);
 
     public async Task DisconnectAsync()
     {
@@ -59,36 +71,10 @@ public sealed class ProtocolClient(
         _cts?.Dispose();
         _session.Dispose();
     }
+}
 
-    public static async Task<ProtocolClient> ConnectAsync(
-        ILoggerFactory loggerFactory,
-        string address,
-        int port,
-        Action<ProtocolRouteBuilder> routeConfig)
-    {
-        var socket = default(Socket?);
-
-        try
-        {
-            socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            await socket.ConnectAsync(address, port);
-
-            var connection = new SocketProtocolConnection(socket);
-
-            var builder = new ProtocolRouteBuilder();
-            routeConfig(builder);
-
-            var logger = loggerFactory.CreateLogger<ProtocolClient>();
-            var client = new ProtocolClient(logger, connection, builder.Build());
-            client.StartReceiving();
-
-            return client;
-        }
-        catch
-        {
-            socket?.Dispose();
-
-            throw;
-        }
-    }
+internal static partial class ProtocolClientLoggerExtensions
+{
+    [LoggerMessage("Receive Error")]
+    public static partial void LogReceiveError(this ILogger logger, LogLevel logLevel, Exception exception);
 }

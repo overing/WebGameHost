@@ -27,11 +27,24 @@ internal sealed class InvocationContext
     public CancellationToken CancellationToken { get; set; }
 }
 
-public sealed class ProtocolRouteBuilder
+public interface IProtocolRouteBuilder
 {
-    private readonly Dictionary<string, ProtocolMeta> _mapping = [];
+    ProtocolRoute Build();
+    IProtocolRouteBuilder MapProtocol(Delegate handler);
+    IProtocolRouteBuilder Clone();
+}
 
-    public ProtocolRouteBuilder MapProtocol(Delegate handler)
+internal sealed class ProtocolRouteBuilder : IProtocolRouteBuilder
+{
+    private readonly Dictionary<string, ProtocolMeta> _mapping;
+
+    public ProtocolRouteBuilder()
+        => _mapping = [];
+
+    private ProtocolRouteBuilder(IDictionary<string, ProtocolMeta> mapping)
+        => _mapping = new(mapping);
+
+    public IProtocolRouteBuilder MapProtocol(Delegate handler)
     {
         if (handler == null) throw new ArgumentNullException(nameof(handler));
 
@@ -153,6 +166,8 @@ public sealed class ProtocolRouteBuilder
     }
 
     public ProtocolRoute Build() => new(_mapping);
+
+    public IProtocolRouteBuilder Clone() => new ProtocolRouteBuilder(_mapping);
 }
 
 public sealed class ProtocolRoute
