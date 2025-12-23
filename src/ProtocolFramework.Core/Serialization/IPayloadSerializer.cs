@@ -14,5 +14,5 @@ public interface IPayloadSerializer
     /// <summary>
     /// 反序列化物件
     /// </summary>
-    object Deserialize(byte[] data, Type targetType);
+    object Deserialize(ReadOnlySpan<byte> data, Type targetType);
 }

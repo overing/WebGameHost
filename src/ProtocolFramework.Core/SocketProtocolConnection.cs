@@ -22,7 +22,7 @@ public sealed class SocketProtocolConnection : IProtocolConnection, IDisposable
 
     public async ValueTask WriteAsync(ReadOnlyMemory<byte> source, CancellationToken cancellationToken = default)
     {
-        await _socket.SendAsync(source, SocketFlags.None, cancellationToken);
+        await _socket.SendAsync(source, SocketFlags.None, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
     }
 
     /// <summary>
@@ -30,7 +30,7 @@ public sealed class SocketProtocolConnection : IProtocolConnection, IDisposable
     /// </summary>
     public async ValueTask<ReadResult> ReadAsync(CancellationToken cancellationToken = default)
     {
-        var result = await _pipe.Reader.ReadAsync(cancellationToken);
+        var result = await _pipe.Reader.ReadAsync(cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
         return new(result.Buffer, result.IsCompleted);
     }
 
@@ -52,13 +52,13 @@ public sealed class SocketProtocolConnection : IProtocolConnection, IDisposable
             while (!cancellationToken.IsCancellationRequested)
             {
                 var memory = _pipe.Writer.GetMemory(8192);
-                var bytesRead = await _socket.ReceiveAsync(memory, SocketFlags.None, cancellationToken);
+                var bytesRead = await _socket.ReceiveAsync(memory, SocketFlags.None, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
 
                 if (bytesRead == 0)
                     break;
 
                 _pipe.Writer.Advance(bytesRead);
-                await _pipe.Writer.FlushAsync(cancellationToken);
+                await _pipe.Writer.FlushAsync(cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
             }
         }
         catch (Exception)
@@ -67,7 +67,7 @@ public sealed class SocketProtocolConnection : IProtocolConnection, IDisposable
         }
         finally
         {
-            await _pipe.Writer.CompleteAsync();
+            await _pipe.Writer.CompleteAsync().ConfigureAwait(continueOnCapturedContext: false);
         }
     }
 
@@ -76,7 +76,7 @@ public sealed class SocketProtocolConnection : IProtocolConnection, IDisposable
         _cts.Cancel();
         await _fillPipeTask;
         _socket.Close();
-        await _pipe.Reader.CompleteAsync();
+        await _pipe.Reader.CompleteAsync().ConfigureAwait(continueOnCapturedContext: false);
     }
 
     public void Dispose()

@@ -16,7 +16,7 @@ internal sealed class AspNetCoreProtocolConnectionHandler(
     IProtocolRouteBuilder routeBuilder,
     IServiceScopeFactory serviceScopeFactory) : ConnectionHandler
 {
-    private readonly ProtocolConnectionProcessor _processor = new(routeBuilder.Build());
+    private readonly ProtocolConnectionProcessor _processor = new(routeBuilder);
     private readonly IServiceScopeFactory _serviceScopeFactory = serviceScopeFactory;
     private readonly ILogger _logger = logger;
 

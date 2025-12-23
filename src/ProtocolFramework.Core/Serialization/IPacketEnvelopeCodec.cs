@@ -20,8 +20,8 @@ public interface IPacketEnvelopeCodec
 /// <summary>
 /// 解封後的封包資訊
 /// </summary>
-public sealed class PacketEnvelope(string typeName, ReadOnlyMemory<byte> payload)
+public sealed class PacketEnvelope(string typeName, byte[] payload)
 {
     public string TypeName { get; } = typeName ?? throw new ArgumentNullException(nameof(typeName));
-    public ReadOnlyMemory<byte> Payload { get; } = payload;
+    public byte[] Payload { get; } = payload;
 }

@@ -33,15 +33,23 @@ var routeBuilder = app.Services.GetRequiredService<IProtocolRouteBuilder>();
 routeBuilder.MapProtocol(async (IProtocolSession session, LoginResponse response, ILogger<Program> logger, CancellationToken cancellationToken) =>
 {
     logger.LogLogin(LogLevel.Information, response.Success);
-    await Task.Delay(1000, cancellationToken);
-    await session.SendAsync(new EchoRequest(), cancellationToken);
+
+    if (session.Properties.TryGetValue("Echo", out var exists))
+    {
+        var typed = ((CancellationTokenSource cts, Task task))exists;
+        await typed.cts.CancelAsync();
+        try { await typed.task.ConfigureAwait(continueOnCapturedContext: false); } finally { }
+    }
+
+    var cts = CancellationTokenSource.CreateLinkedTokenSource(session.SessionClosed);
+    var task = EchoAsync(session, cts.Token);
+    session.Properties["Echo"] = (cts, task);
 });
 
-routeBuilder.MapProtocol(async (IProtocolSession session, EchoResponse _, ILogger<Program> logger, CancellationToken cancellationToken) =>
+routeBuilder.MapProtocol((IProtocolSession session, EchoResponse _, ILogger<Program> logger, CancellationToken cancellationToken) =>
 {
     logger.LogEcho(LogLevel.Information);
-    await Task.Delay(1000, cancellationToken);
-    await session.SendAsync(new EchoRequest(), cancellationToken);
+    return Task.CompletedTask;
 });
 
 app.Services.GetRequiredService<IHostApplicationLifetime>().ApplicationStarted.Register(async () =>
@@ -53,6 +61,15 @@ app.Services.GetRequiredService<IHostApplicationLifetime>().ApplicationStarted.R
 });
 
 await app.RunAsync();
+
+static async Task EchoAsync(IProtocolSession session, CancellationToken cancellationToken)
+{
+    while (!cancellationToken.IsCancellationRequested)
+    {
+        await Task.Delay(1000, cancellationToken);
+        await session.SendAsync(new EchoRequest(), cancellationToken);
+    }
+}
 
 [SuppressMessage("Performance", "CA1812", Justification = "這個類別透過 DI 建立")]
 internal sealed record class ProgramOptions

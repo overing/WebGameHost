@@ -31,6 +31,9 @@ public sealed class JsonPacketEnvelopeCodec(
         return JsonSerializer.SerializeToUtf8Bytes(wrapper, _options);
     }
 
+    private const string TypeName = nameof(EnvelopeDto.TypeName);
+    private const string Payload = nameof(EnvelopeDto.Payload);
+
     public PacketEnvelope Decode(byte[] data)
     {
         if (data == null)
@@ -39,22 +42,22 @@ public sealed class JsonPacketEnvelopeCodec(
         using var doc = JsonDocument.Parse(data);
         var root = doc.RootElement;
 
-        if (!root.TryGetProperty("TypeName", out var typeNameElement))
-            throw new FormatException("Missing TypeName property");
+        if (!root.TryGetProperty(TypeName, out var typeNameElement))
+            throw new FormatException($"Missing {TypeName} property");
 
         var typeName = typeNameElement.GetString()
-            ?? throw new FormatException("TypeName is null");
+            ?? throw new FormatException($"{TypeName} is null");
 
-        if (!root.TryGetProperty("Payload", out var payloadElement))
-            throw new FormatException("Missing Payload property");
+        if (!root.TryGetProperty(Payload, out var payloadElement))
+            throw new FormatException($"Missing {Payload} property");
 
         var payloadJson = payloadElement.GetRawText();
         var payloadBytes = Encoding.UTF8.GetBytes(payloadJson);
 
-        return new PacketEnvelope(typeName, payloadBytes);
+        return new(typeName, payloadBytes);
     }
 
-    private sealed class EnvelopeDto
+    internal sealed class EnvelopeDto
     {
         public string TypeName { get; set; } = default!;
         public JsonElement Payload { get; set; }

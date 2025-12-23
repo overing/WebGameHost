@@ -1,5 +1,5 @@
 
-using System.ComponentModel.Design;
+using System.Collections.Frozen;
 using System.Diagnostics;
 using System.Linq.Expressions;
 using System.Reflection;
@@ -11,8 +11,8 @@ namespace ProtocolFramework.Core;
 
 internal sealed record class ProtocolMeta
 {
-    public Type PacketType { get; set; }
-    public Func<object, InvocationContext, Task> CompiledHandler { get; set; }
+    public Type PacketType { get; }
+    public Func<object, InvocationContext, Task> CompiledHandler { get; }
 
     public ProtocolMeta(Type packetType, Func<object, InvocationContext, Task> compiledHandler)
     {
@@ -179,7 +179,7 @@ internal sealed class ProtocolRouteBuilder : IProtocolRouteBuilder
         var logger = _serviceProvider.GetRequiredService<ILogger<ProtocolRoute>>();
         var codec = _serviceProvider.GetRequiredService<IPacketEnvelopeCodec>();
         var serializer = _serviceProvider.GetRequiredService<IPayloadSerializer>();
-        return new(logger, codec, serializer, _mapping);
+        return new(logger, codec, serializer, _mapping.ToFrozenDictionary());
     }
 
     public IProtocolRouteBuilder Clone() => new ProtocolRouteBuilder(_serviceProvider, _mapping);
@@ -188,7 +188,7 @@ internal sealed class ProtocolRouteBuilder : IProtocolRouteBuilder
 public sealed class ProtocolRoute
 {
     private readonly ILogger<ProtocolRoute> _logger;
-    private readonly IReadOnlyDictionary<string, ProtocolMeta> _mapping;
+    private readonly FrozenDictionary<string, ProtocolMeta> _mapping;
     private readonly IPacketEnvelopeCodec _codec;
     private readonly IPayloadSerializer _serializer;
 
@@ -196,7 +196,7 @@ public sealed class ProtocolRoute
         ILogger<ProtocolRoute> logger,
         IPacketEnvelopeCodec codec,
         IPayloadSerializer serializer,
-        IReadOnlyDictionary<string, ProtocolMeta> mapping)
+        FrozenDictionary<string, ProtocolMeta> mapping)
     {
         _logger = logger;
         _codec = codec ?? throw new ArgumentNullException(nameof(codec));
@@ -216,9 +216,7 @@ public sealed class ProtocolRoute
             return;
 
         var stampBeginDeserialize = Stopwatch.GetTimestamp();
-        var packet = _serializer.Deserialize(
-            envelope.Payload.ToArray(),
-            meta.PacketType);
+        var packet = _serializer.Deserialize(envelope.Payload, meta.PacketType);
         var elapsedDeserialize = TimeSpan.FromTicks(Stopwatch.GetTimestamp() - stampBeginDeserialize);
 
         var context = new InvocationContext

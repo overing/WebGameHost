@@ -7,11 +7,11 @@ namespace ProtocolFramework.Core;
 /// <summary>
 /// 通用的封包處理器（可在 Core 中）
 /// </summary>
-public sealed class ProtocolConnectionProcessor(ProtocolRoute route)
+public sealed class ProtocolConnectionProcessor(IProtocolRouteBuilder protocolRouteBuilder)
 {
     private const int MaxPacketSize = 10 * 1024 * 1024;
 
-    private readonly ProtocolRoute _route = route;
+    private readonly IProtocolRouteBuilder _protocolRouteBuilder = protocolRouteBuilder;
 
     /// <summary>
     /// 通用的封包處理邏輯 - 完全基於抽象介面
@@ -22,9 +22,15 @@ public sealed class ProtocolConnectionProcessor(ProtocolRoute route)
         IServiceScopeFactory serviceScopeFactory,
         CancellationToken cancellationToken = default)
     {
-        while (!cancellationToken.IsCancellationRequested)
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, session.SessionClosed);
+
+        var token = linkedCts.Token;
+
+        var route = _protocolRouteBuilder.Build();
+
+        while (!token.IsCancellationRequested)
         {
-            var result = await reader.ReadAsync(cancellationToken);
+            var result = await reader.ReadAsync(token).ConfigureAwait(continueOnCapturedContext: false);
             var buffer = result.Buffer;
 
             while (TryReadPacket(ref buffer, out var packetData))
@@ -32,7 +38,7 @@ public sealed class ProtocolConnectionProcessor(ProtocolRoute route)
                 using var scope = serviceScopeFactory.CreateScope();
                 try
                 {
-                    await _route.InvokeAsync(packetData, session, scope.ServiceProvider, cancellationToken);
+                    await route.InvokeAsync(packetData, session, scope.ServiceProvider, token).ConfigureAwait(continueOnCapturedContext: false);
                 }
                 catch (Exception)
                 {

@@ -30,7 +30,7 @@ internal sealed class ProtocolClientFactory(IServiceProvider serviceProvider, IP
         try
         {
             socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            await socket.ConnectAsync(address, port);
+            await socket.ConnectAsync(address, port).ConfigureAwait(continueOnCapturedContext: false);
 
             var connection = new SocketProtocolConnection(socket);
 
@@ -41,7 +41,7 @@ internal sealed class ProtocolClientFactory(IServiceProvider serviceProvider, IP
                 configRoute.Invoke(builder);
             }
 
-            var client = ActivatorUtilities.CreateInstance<ProtocolClient>(_serviceProvider, connection, builder.Build());
+            var client = ActivatorUtilities.CreateInstance<ProtocolClient>(_serviceProvider, connection);
             client.StartProcessReceive(cancellationToken);
 
             return client;

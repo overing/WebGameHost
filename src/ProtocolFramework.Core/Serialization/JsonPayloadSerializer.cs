@@ -17,9 +17,8 @@ public sealed class JsonPayloadSerializer(JsonSerializerOptions? options) : IPay
         return JsonSerializer.SerializeToUtf8Bytes(packet, type, _options);
     }
 
-    public object Deserialize(byte[] data, Type targetType)
+    public object Deserialize(ReadOnlySpan<byte> data, Type targetType)
     {
-        if (data == null) throw new ArgumentNullException(nameof(data));
         if (targetType == null) throw new ArgumentNullException(nameof(targetType));
 
         return JsonSerializer.Deserialize(data, targetType, _options)
