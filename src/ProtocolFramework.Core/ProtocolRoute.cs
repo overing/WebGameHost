@@ -1,10 +1,11 @@
 
+using System.ComponentModel.Design;
 using System.Diagnostics;
 using System.Linq.Expressions;
 using System.Reflection;
-using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using ProtocolFramework.Core.Serialization;
 
 namespace ProtocolFramework.Core;
 
@@ -23,7 +24,7 @@ internal sealed record class ProtocolMeta
 internal sealed class InvocationContext
 {
     public IProtocolSession Session { get; set; } = default!;
-    public IServiceProvider? ServiceProvider { get; set; }
+    public IServiceProvider ServiceProvider { get; set; } = default!;
     public CancellationToken CancellationToken { get; set; }
 }
 
@@ -36,13 +37,19 @@ public interface IProtocolRouteBuilder
 
 internal sealed class ProtocolRouteBuilder : IProtocolRouteBuilder
 {
+    private readonly IServiceProvider _serviceProvider;
+    private readonly IPacketTypeResolver _packetTypeResolver;
     private readonly Dictionary<string, ProtocolMeta> _mapping;
 
-    public ProtocolRouteBuilder()
-        => _mapping = [];
+    public ProtocolRouteBuilder(IServiceProvider serviceProvider)
+        : this(serviceProvider, new Dictionary<string, ProtocolMeta>(StringComparer.Ordinal)) { }
 
-    private ProtocolRouteBuilder(IDictionary<string, ProtocolMeta> mapping)
-        => _mapping = new(mapping);
+    private ProtocolRouteBuilder(IServiceProvider serviceProvider, IDictionary<string, ProtocolMeta> mapping)
+    {
+        _serviceProvider = serviceProvider;
+        _packetTypeResolver = serviceProvider.GetRequiredService<IPacketTypeResolver>();
+        _mapping = new(mapping);
+    }
 
     public IProtocolRouteBuilder MapProtocol(Delegate handler)
     {
@@ -51,11 +58,13 @@ internal sealed class ProtocolRouteBuilder : IProtocolRouteBuilder
         var methodInfo = handler.Method;
         var parameters = methodInfo.GetParameters();
 
-        var packetParam = parameters.FirstOrDefault(p =>
+        var packetParam = parameters.SingleOrDefault(p =>
             p.ParameterType.IsClass &&
+            !p.ParameterType.IsAbstract &&
             p.ParameterType != typeof(string) &&
             p.ParameterType != typeof(IProtocolSession) &&
-            p.ParameterType != typeof(CancellationToken))
+            p.ParameterType != typeof(CancellationToken) &&
+            _packetTypeResolver.TryGetTypeName(p.ParameterType, out _))
             ?? throw new ArgumentException("Handler must have at least one packet parameter");
 
         var packetType = packetParam.ParameterType;
@@ -165,43 +174,51 @@ internal sealed class ProtocolRouteBuilder : IProtocolRouteBuilder
         return lambda.Compile();
     }
 
-    public ProtocolRoute Build() => new(_mapping);
+    public ProtocolRoute Build()
+    {
+        var logger = _serviceProvider.GetRequiredService<ILogger<ProtocolRoute>>();
+        var codec = _serviceProvider.GetRequiredService<IPacketEnvelopeCodec>();
+        var serializer = _serviceProvider.GetRequiredService<IPayloadSerializer>();
+        return new(logger, codec, serializer, _mapping);
+    }
 
-    public IProtocolRouteBuilder Clone() => new ProtocolRouteBuilder(_mapping);
+    public IProtocolRouteBuilder Clone() => new ProtocolRouteBuilder(_serviceProvider, _mapping);
 }
 
 public sealed class ProtocolRoute
 {
+    private readonly ILogger<ProtocolRoute> _logger;
     private readonly IReadOnlyDictionary<string, ProtocolMeta> _mapping;
+    private readonly IPacketEnvelopeCodec _codec;
+    private readonly IPayloadSerializer _serializer;
 
-    internal ProtocolRoute(IReadOnlyDictionary<string, ProtocolMeta> mapping)
+    internal ProtocolRoute(
+        ILogger<ProtocolRoute> logger,
+        IPacketEnvelopeCodec codec,
+        IPayloadSerializer serializer,
+        IReadOnlyDictionary<string, ProtocolMeta> mapping)
     {
+        _logger = logger;
+        _codec = codec ?? throw new ArgumentNullException(nameof(codec));
+        _serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         _mapping = mapping;
     }
 
     public async Task InvokeAsync(
         byte[] data,
         IProtocolSession session,
-        IServiceProvider? serviceProvider = null,
+        IServiceProvider serviceProvider,
         CancellationToken cancellationToken = default)
     {
-        using var doc = JsonDocument.Parse(data);
-        var root = doc.RootElement;
+        var envelope = _codec.Decode(data);
 
-        if (!root.TryGetProperty("TypeName", out var typeNameElement))
-            return;
-
-        var typeName = typeNameElement.GetString();
-        if (string.IsNullOrEmpty(typeName) || !_mapping.TryGetValue(typeName, out var meta))
-            return;
-
-        if (!root.TryGetProperty("PacketData", out var packetElement))
+        if (!_mapping.TryGetValue(envelope.TypeName, out var meta))
             return;
 
         var stampBeginDeserialize = Stopwatch.GetTimestamp();
-        var packetBytes = Convert.FromBase64String(packetElement.GetString()!);
-        var packet = JsonSerializer.Deserialize(packetBytes, meta.PacketType)
-            ?? throw new FormatException("Packet data not available");
+        var packet = _serializer.Deserialize(
+            envelope.Payload.ToArray(),
+            meta.PacketType);
         var elapsedDeserialize = TimeSpan.FromTicks(Stopwatch.GetTimestamp() - stampBeginDeserialize);
 
         var context = new InvocationContext
@@ -212,10 +229,15 @@ public sealed class ProtocolRoute
         };
 
         var stampBeginInvoke = Stopwatch.GetTimestamp();
-        await meta.CompiledHandler(packet, context);
+        await meta.CompiledHandler(packet, context).ConfigureAwait(false);
         var elapsedInvoke = TimeSpan.FromTicks(Stopwatch.GetTimestamp() - stampBeginInvoke);
 
-        var logger = serviceProvider?.GetRequiredService<ILogger<ProtocolRoute>>();
-        logger?.LogInformation($"{meta.PacketType}, session#{session.SessionId}, deserialize: {elapsedDeserialize.TotalMilliseconds:N3}ms, invoke: {elapsedInvoke.TotalMilliseconds:N3}ms");
+        _logger.LogProtocolElapsed(LogLevel.Information, meta.PacketType, session.SessionId, elapsedDeserialize.TotalMilliseconds, elapsedInvoke.TotalMilliseconds);
     }
+}
+
+internal static partial class ProtocolRouteLoggerExtensions
+{
+    [LoggerMessage("{PacketType}, session#{SessionId}, deserialize: {ElapsedDeserializeMs:N3}ms, invoke: {ElapsedInvokeMs:N3}ms")]
+    public static partial void LogProtocolElapsed(this ILogger logger, LogLevel logLevel, Type packetType, string sessionId, double elapsedDeserializeMs, double elapsedInvokeMs);
 }

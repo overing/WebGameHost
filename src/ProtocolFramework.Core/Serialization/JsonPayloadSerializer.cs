@@ -1,0 +1,28 @@
+
+using System.Text.Json;
+
+namespace ProtocolFramework.Core.Serialization;
+
+public sealed class JsonPayloadSerializer(JsonSerializerOptions? options) : IPayloadSerializer
+{
+    private readonly JsonSerializerOptions _options = options ?? new JsonSerializerOptions();
+
+    public JsonPayloadSerializer() : this(null) { }
+
+    public byte[] Serialize(object packet, Type type)
+    {
+        if (packet == null) throw new ArgumentNullException(nameof(packet));
+        if (type == null) throw new ArgumentNullException(nameof(type));
+
+        return JsonSerializer.SerializeToUtf8Bytes(packet, type, _options);
+    }
+
+    public object Deserialize(byte[] data, Type targetType)
+    {
+        if (data == null) throw new ArgumentNullException(nameof(data));
+        if (targetType == null) throw new ArgumentNullException(nameof(targetType));
+
+        return JsonSerializer.Deserialize(data, targetType, _options)
+            ?? throw new FormatException($"Deserialization returned null for type {targetType}");
+    }
+}

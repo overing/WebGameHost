@@ -21,7 +21,10 @@ appBuilder.Services
     .ValidateDataAnnotations()
     .ValidateOnStart();
 
-appBuilder.Services.AddProtocolCore();
+appBuilder.Services.AddProtocolCore(options =>
+{
+    options.RegisterAssemblyOf<EchoRequest>();
+});
 
 var app = appBuilder.Build();
 

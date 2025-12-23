@@ -5,12 +5,14 @@ using Microsoft.AspNetCore.Connections.Features;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using ProtocolFramework.Core;
+using ProtocolFramework.Core.Serialization;
 
 namespace ProtocolFramework.Host;
 
 [SuppressMessage("Performance", "CA1812", Justification = "這個類別透過 DI 建立")]
 internal sealed class AspNetCoreProtocolConnectionHandler(
     ILogger<AspNetCoreProtocolConnectionHandler> logger,
+    IPacketEnvelopeCodec packetEnvelopeCodec,
     IProtocolRouteBuilder routeBuilder,
     IServiceScopeFactory serviceScopeFactory) : ConnectionHandler
 {
@@ -22,7 +24,7 @@ internal sealed class AspNetCoreProtocolConnectionHandler(
     public override async Task OnConnectedAsync(ConnectionContext connection)
     {
         var protocolConnection = new AspNetCoreProtocolConnection(connection);
-        using var session = new ProtocolSession(protocolConnection);
+        using var session = new ProtocolSession(protocolConnection, packetEnvelopeCodec);
 
         _logger.LogClientConnected(LogLevel.Information, session.SessionId);
 

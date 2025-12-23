@@ -1,6 +1,7 @@
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using ProtocolFramework.Core.Serialization;
 
 namespace ProtocolFramework.Core;
 
@@ -10,7 +11,7 @@ public interface IProtocolClient : IDisposable
     /// 開始接收 - 使用相同的處理器
     /// </summary>
     void StartProcessReceive(CancellationToken cancellationToken = default);
-    Task SendAsync<TPacket>(TPacket packet, CancellationToken cancellationToken = default);
+    Task SendAsync<TPacket>(TPacket packet, CancellationToken cancellationToken = default) where TPacket : class;
     Task DisconnectAsync();
 }
 
@@ -18,13 +19,14 @@ internal sealed class ProtocolClient(
     ILogger<ProtocolClient> logger,
     IServiceScopeFactory serviceScopeFactory,
     IProtocolConnection connection,
+    IPacketEnvelopeCodec packetEnvelopeCodec,
     ProtocolRoute route)
     : IProtocolClient
 {
     private readonly ILogger _logger = logger;
     private readonly IServiceScopeFactory _serviceScopeFactory = serviceScopeFactory;
     private readonly IProtocolConnection _connection = connection;
-    private readonly ProtocolSession _session = new(connection);
+    private readonly ProtocolSession _session = new(connection, packetEnvelopeCodec);
     private readonly ProtocolConnectionProcessor _processor = new(route);
     private Task? _receiveTask;
     private CancellationTokenSource? _cts;
@@ -55,7 +57,7 @@ internal sealed class ProtocolClient(
         }
     }
 
-    public Task SendAsync<TPacket>(TPacket packet, CancellationToken cancellationToken = default)
+    public Task SendAsync<TPacket>(TPacket packet, CancellationToken cancellationToken = default) where TPacket : class
         => _session.SendAsync(packet, cancellationToken);
 
     public async Task DisconnectAsync()

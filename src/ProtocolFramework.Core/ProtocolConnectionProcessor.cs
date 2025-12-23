@@ -19,7 +19,7 @@ public sealed class ProtocolConnectionProcessor(ProtocolRoute route)
     public async Task ProcessPacketsAsync(
         IProtocolReader reader,
         IProtocolSession session,
-        IServiceScopeFactory? serviceScopeFactory = null,
+        IServiceScopeFactory serviceScopeFactory,
         CancellationToken cancellationToken = default)
     {
         while (!cancellationToken.IsCancellationRequested)
@@ -29,10 +29,10 @@ public sealed class ProtocolConnectionProcessor(ProtocolRoute route)
 
             while (TryReadPacket(ref buffer, out var packetData))
             {
-                using var scope = serviceScopeFactory?.CreateScope();
+                using var scope = serviceScopeFactory.CreateScope();
                 try
                 {
-                    await _route.InvokeAsync(packetData, session, scope?.ServiceProvider, cancellationToken);
+                    await _route.InvokeAsync(packetData, session, scope.ServiceProvider, cancellationToken);
                 }
                 catch (Exception)
                 {

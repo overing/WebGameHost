@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using ProtocolFramework.Core;
+using ProtocolFramework.Core.Serialization;
 
 namespace ProtocolFramework.Host;
 
@@ -20,11 +21,14 @@ public static class AspNetCoreProtocolHostExtensions
         return protocolRouteBuilder.MapProtocol(handler);
     }
 
-    public static WebApplicationBuilder AddAspNetCoreProtocolHost(this WebApplicationBuilder builder, int port = 5100)
+    public static WebApplicationBuilder AddAspNetCoreProtocolHost(
+        this WebApplicationBuilder builder,
+        Action<PacketTypeResolverOptions> configureOptions,
+        int port = 5100)
     {
         ArgumentNullException.ThrowIfNull(builder);
 
-        builder.Services.AddProtocolCore();
+        builder.Services.AddProtocolCore(configureOptions);
         builder.Services.AddSingleton<AspNetCoreProtocolConnectionHandler>();
 
         builder.WebHost.UseKestrel(ConfigKestrel);

@@ -10,7 +10,10 @@ appBuilder.Logging.ClearProviders()
 
 appBuilder.Services.AddOpenApi();
 
-appBuilder.AddAspNetCoreProtocolHost();
+appBuilder.AddAspNetCoreProtocolHost(options =>
+{
+    options.RegisterAssemblyOf<EchoRequest>();
+});
 
 var app = appBuilder.Build();
 
