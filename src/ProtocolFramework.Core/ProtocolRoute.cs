@@ -53,7 +53,7 @@ internal sealed class ProtocolRouteBuilder : IProtocolRouteBuilder
 
     public IProtocolRouteBuilder MapProtocol(Delegate handler)
     {
-        if (handler == null) throw new ArgumentNullException(nameof(handler));
+        ArgumentNullException.ThrowIfNull(handler);
 
         var methodInfo = handler.Method;
         var parameters = methodInfo.GetParameters();
@@ -210,13 +210,15 @@ public sealed class ProtocolRoute
         IServiceProvider serviceProvider,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(session);
+
         var envelope = _codec.Decode(data);
 
         if (!_mapping.TryGetValue(envelope.TypeName, out var meta))
             return;
 
         var stampBeginDeserialize = Stopwatch.GetTimestamp();
-        var packet = _serializer.Deserialize(envelope.Payload, meta.PacketType);
+        var packet = _serializer.Deserialize(envelope.PayloadSpan, meta.PacketType);
         var elapsedDeserialize = TimeSpan.FromTicks(Stopwatch.GetTimestamp() - stampBeginDeserialize);
 
         var context = new InvocationContext

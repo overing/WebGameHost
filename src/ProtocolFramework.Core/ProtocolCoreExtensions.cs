@@ -11,11 +11,8 @@ public static class ProtocolCoreExtensions
         this IServiceCollection collection,
         Action<PacketTypeResolverOptions> configureOptions)
     {
-        if (collection == null)
-            throw new ArgumentNullException(nameof(collection));
-
-        if (configureOptions == null)
-            throw new ArgumentNullException(nameof(configureOptions));
+        ArgumentNullException.ThrowIfNull(collection);
+        ArgumentNullException.ThrowIfNull(configureOptions);
 
         var options = new PacketTypeResolverOptions();
         configureOptions.Invoke(options);
@@ -26,7 +23,7 @@ public static class ProtocolCoreExtensions
         collection.TryAddSingleton<IPacketEnvelopeCodec, JsonPacketEnvelopeCodec>();
 
         collection.AddSingleton<IProtocolRouteBuilder, ProtocolRouteBuilder>();
-        collection.AddSingleton<IProtocolClientFactory, ProtocolClientFactory>();
+        collection.AddSingleton<IProtocolClientFactory, WebSocketProtocolClientFactory>();
 
         return collection;
     }

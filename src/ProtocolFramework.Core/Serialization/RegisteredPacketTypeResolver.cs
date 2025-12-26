@@ -15,7 +15,7 @@ public sealed class RegisteredPacketTypeResolver : IPacketTypeResolver
 
     public RegisteredPacketTypeResolver(PacketTypeResolverOptions options)
     {
-        if (options == null) throw new ArgumentNullException(nameof(options));
+        ArgumentNullException.ThrowIfNull(options);
 
         _allowDynamicResolution = options.AllowDynamicResolution;
 
@@ -34,7 +34,7 @@ public sealed class RegisteredPacketTypeResolver : IPacketTypeResolver
 
     public bool TryGetTypeName(Type type, [NotNullWhen(returnValue: true)] out string? name)
     {
-        if (type == null) throw new ArgumentNullException(nameof(type));
+        ArgumentNullException.ThrowIfNull(type);
 
         if (_typeToName.TryGetValue(type, out name))
             return true;
@@ -95,7 +95,7 @@ public sealed class RegisteredPacketTypeResolver : IPacketTypeResolver
         catch (ReflectionTypeLoadException ex)
         {
             // 處理部分載入失敗的情況
-            types = ex.Types.Where(t => t != null).ToArray();
+            types = ex.Types.OfType<Type>().ToArray();
         }
 
         foreach (var type in types)

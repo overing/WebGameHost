@@ -1,4 +1,8 @@
 
+using System.Diagnostics.CodeAnalysis;
+using System.Net.Http.Json;
+using System.Net.Sockets;
+using System.Net.WebSockets;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using ProtocolFramework.Core.Serialization;
@@ -7,12 +11,14 @@ namespace ProtocolFramework.Core;
 
 public interface IProtocolClient : IDisposable
 {
+    IProtocolSession ProtocolSession { get; }
     CancellationToken ConnectionClosed { get; }
     void StartProcessReceive(CancellationToken cancellationToken = default);
     Task SendAsync<TPacket>(TPacket packet, CancellationToken cancellationToken = default) where TPacket : class;
     Task DisconnectAsync();
 }
 
+[SuppressMessage("Performance", "CA1812", Justification = "This class is instantiated via DI")]
 internal sealed class ProtocolClient(
     ILogger<ProtocolClient> logger,
     IServiceScopeFactory serviceScopeFactory,
@@ -28,6 +34,7 @@ internal sealed class ProtocolClient(
     private readonly ProtocolConnectionProcessor _processor = new(protocolRouteBuilder);
     private Task? _receiveTask;
 
+    public IProtocolSession ProtocolSession => _session;
     public CancellationToken ConnectionClosed => _session.SessionClosed;
 
     public void StartProcessReceive(CancellationToken cancellationToken = default)
@@ -55,10 +62,10 @@ internal sealed class ProtocolClient(
         {
             _logger.LogSessionClosed(LogLevel.Debug, _session.SessionId);
         }
-        catch (Exception ex)
-        {
-            _logger.LogReceiveError(LogLevel.Error, ex, _session.SessionId);
-        }
+        // catch (Exception ex)
+        // {
+        //     _logger.LogReceiveError(LogLevel.Error, ex, _session.SessionId);
+        // }
     }
 
     public Task SendAsync<TPacket>(TPacket packet, CancellationToken cancellationToken = default) where TPacket : class
@@ -91,4 +98,66 @@ internal static partial class ProtocolClientLoggerExtensions
     public static partial void LogSessionClosed(this ILogger logger, LogLevel logLevel, string sessionId);
     [LoggerMessage("Session#{SessionId} Receive Error")]
     public static partial void LogReceiveError(this ILogger logger, LogLevel logLevel, Exception exception, string sessionId);
+}
+
+public interface IProtocolClientFactory
+{
+    Task<IProtocolClient> ConnectAsync(
+        string address,
+        int port,
+        string token,
+        Action<IProtocolRouteBuilder>? configRoute = null,
+        CancellationToken cancellationToken = default);
+}
+
+[SuppressMessage("Performance", "CA1812", Justification = "This class is instantiated via DI")]
+internal sealed class WebSocketProtocolClientFactory(
+    IServiceProvider serviceProvider,
+    IProtocolRouteBuilder protocolRouteBuilder,
+    IPacketEnvelopeCodec codec)
+    : IProtocolClientFactory
+{
+    private readonly IServiceProvider _serviceProvider = serviceProvider;
+    private readonly IProtocolRouteBuilder _protocolRouteBuilder = protocolRouteBuilder;
+    private readonly IPacketEnvelopeCodec _codec = codec;
+
+    public async Task<IProtocolClient> ConnectAsync(
+        string address,
+        int port,
+        string token,
+        Action<IProtocolRouteBuilder>? configRoute,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+#pragma warning disable CA2000 // Dispose objects before losing scope
+            var socket = new ClientWebSocket();
+            socket.Options.KeepAliveInterval = TimeSpan.FromSeconds(20);
+            socket.Options.KeepAliveTimeout = TimeSpan.FromSeconds(20);
+            socket.Options.SetRequestHeader("Authorization", $"Bearer {token}");
+            var wsUri = new Uri($"ws://{address}:{port}/ws?access_token={token}");
+            await socket.ConnectAsync(wsUri, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
+
+            var stream = WebSocketStream.Create(socket, WebSocketMessageType.Binary, ownsWebSocket: true);
+            var connection = new StreamProtocolConnection(stream);
+            var session = new ProtocolSession(connection, _codec);
+#pragma warning restore CA2000 // Dispose objects before losing scope
+
+            var builder = _protocolRouteBuilder;
+            if (configRoute is { })
+            {
+                builder = builder.Clone();
+                configRoute.Invoke(builder);
+            }
+
+            var client = ActivatorUtilities.CreateInstance<ProtocolClient>(_serviceProvider, connection);
+            client.StartProcessReceive(cancellationToken);
+
+            return client;
+        }
+        catch
+        {
+            throw;
+        }
+    }
 }

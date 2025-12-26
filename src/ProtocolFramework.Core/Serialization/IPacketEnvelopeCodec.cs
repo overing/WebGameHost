@@ -22,6 +22,7 @@ public interface IPacketEnvelopeCodec
 /// </summary>
 public sealed class PacketEnvelope(string typeName, byte[] payload)
 {
+    private readonly byte[] _payload = payload;
     public string TypeName { get; } = typeName ?? throw new ArgumentNullException(nameof(typeName));
-    public byte[] Payload { get; } = payload;
+    public ReadOnlySpan<byte> PayloadSpan => _payload.AsSpan();
 }

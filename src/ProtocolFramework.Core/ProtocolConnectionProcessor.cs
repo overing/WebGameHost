@@ -1,4 +1,3 @@
-
 using System.Buffers;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -9,8 +8,6 @@ namespace ProtocolFramework.Core;
 /// </summary>
 public sealed class ProtocolConnectionProcessor(IProtocolRouteBuilder protocolRouteBuilder)
 {
-    private const int MaxPacketSize = 10 * 1024 * 1024;
-
     private readonly IProtocolRouteBuilder _protocolRouteBuilder = protocolRouteBuilder;
 
     /// <summary>
@@ -22,6 +19,10 @@ public sealed class ProtocolConnectionProcessor(IProtocolRouteBuilder protocolRo
         IServiceScopeFactory serviceScopeFactory,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(reader);
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(serviceScopeFactory);
+
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, session.SessionClosed);
 
         var token = linkedCts.Token;
@@ -30,53 +31,28 @@ public sealed class ProtocolConnectionProcessor(IProtocolRouteBuilder protocolRo
 
         while (!token.IsCancellationRequested)
         {
-            var result = await reader.ReadAsync(token).ConfigureAwait(continueOnCapturedContext: false);
-            var buffer = result.Buffer;
-
-            while (TryReadPacket(ref buffer, out var packetData))
+            ReadOnlyMemory<byte> packetData;
+            try
             {
-                using var scope = serviceScopeFactory.CreateScope();
-                try
-                {
-                    await route.InvokeAsync(packetData, session, scope.ServiceProvider, token).ConfigureAwait(continueOnCapturedContext: false);
-                }
-                catch (Exception)
-                {
-                    // 錯誤處理由外部提供（通過回調或事件）
-                    throw;
-                }
+                packetData = await reader.ReadAsync(token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
             }
 
-            reader.AdvanceTo(buffer.Start, buffer.End);
+            if (packetData.IsEmpty) continue;
 
-            if (result.IsCompleted)
-                break;
+            using var scope = serviceScopeFactory.CreateScope();
+            try
+            {
+                await route.InvokeAsync(packetData.ToArray(), session, scope.ServiceProvider, token).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // 錯誤處理由外部提供（通過回調或事件）
+                throw;
+            }
         }
     }
-
-    private static bool TryReadPacket(ref ReadOnlySequence<byte> buffer, out byte[] packet)
-    {
-        packet = [];
-
-        if (buffer.Length < sizeof(int))
-            return false;
-
-        Span<byte> lengthBytes = stackalloc byte[sizeof(int)];
-        buffer.Slice(0, sizeof(int)).CopyTo(lengthBytes);
-        var length = BitConverter.ToInt32(lengthBytes);
-
-        if (length <= 0 || length > MaxPacketSize)
-            throw new InvalidDataException($"Invalid packet length: {length}");
-
-        var totalLength = sizeof(int) + length;
-        if (buffer.Length < totalLength)
-            return false;
-
-        packet = new byte[length];
-        buffer.Slice(sizeof(int), length).CopyTo(packet);
-
-        buffer = buffer.Slice(totalLength);
-        return true;
-    }
 }
-

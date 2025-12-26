@@ -27,7 +27,7 @@ public sealed class PacketTypeResolverOptions
     /// <summary>
     /// 是否允許 Fallback 到動態解析（預設：false）
     /// </summary>
-    public bool AllowDynamicResolution { get; set; } = false;
+    public bool AllowDynamicResolution { get; set; }
 
     /// <summary>
     /// 註冊單一類型
@@ -42,11 +42,11 @@ public sealed class PacketTypeResolverOptions
     /// </summary>
     public PacketTypeResolverOptions Register(Type type)
     {
-        if (type == null) throw new ArgumentNullException(nameof(type));
-        
+        ArgumentNullException.ThrowIfNull(type);
+
         if (!_registeredTypes.Contains(type))
             _registeredTypes.Add(type);
-        
+
         return this;
     }
 
@@ -55,7 +55,7 @@ public sealed class PacketTypeResolverOptions
     /// </summary>
     public PacketTypeResolverOptions Register(params Type[] types)
     {
-        if (types == null) throw new ArgumentNullException(nameof(types));
+        ArgumentNullException.ThrowIfNull(types);
 
         foreach (var type in types)
             Register(type);
@@ -68,7 +68,7 @@ public sealed class PacketTypeResolverOptions
     /// </summary>
     public PacketTypeResolverOptions RegisterAssembly(Assembly assembly)
     {
-        if (assembly == null) throw new ArgumentNullException(nameof(assembly));
+        ArgumentNullException.ThrowIfNull(assembly);
 
         if (!_registeredAssemblies.Contains(assembly))
             _registeredAssemblies.Add(assembly);
@@ -89,7 +89,7 @@ public sealed class PacketTypeResolverOptions
     /// </summary>
     public PacketTypeResolverOptions AddTypeFilter(Func<Type, bool> filter)
     {
-        if (filter == null) throw new ArgumentNullException(nameof(filter));
+        ArgumentNullException.ThrowIfNull(filter);
 
         _typeFilters.Add(filter);
         return this;
@@ -103,7 +103,7 @@ public sealed class PacketTypeResolverOptions
         if (string.IsNullOrEmpty(@namespace))
             throw new ArgumentNullException(nameof(@namespace));
 
-        return AddTypeFilter(t => 
+        return AddTypeFilter(t =>
             t.Namespace != null && t.Namespace.StartsWith(@namespace, StringComparison.Ordinal));
     }
 

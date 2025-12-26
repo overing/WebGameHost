@@ -16,8 +16,7 @@ public sealed class JsonPacketEnvelopeCodec(
 
     public byte[] Encode<T>(T packet) where T : class
     {
-        if (packet == null)
-            throw new ArgumentNullException(nameof(packet));
+        ArgumentNullException.ThrowIfNull(packet);
 
         if (!_typeResolver.TryGetTypeName(typeof(T), out var typeName))
             throw new InvalidOperationException($"Type '{typeof(T)}' is not registered. Register it in PacketTypeResolverOptions.");
@@ -36,8 +35,7 @@ public sealed class JsonPacketEnvelopeCodec(
 
     public PacketEnvelope Decode(byte[] data)
     {
-        if (data == null)
-            throw new ArgumentNullException(nameof(data));
+        ArgumentNullException.ThrowIfNull(data);
 
         using var doc = JsonDocument.Parse(data);
         var root = doc.RootElement;

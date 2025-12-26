@@ -26,8 +26,8 @@ public sealed class ProtocolSession(IProtocolConnection connection, IPacketEnvel
 
     public async Task SendAsync<TPacket>(TPacket packet, CancellationToken cancellationToken = default) where TPacket : class
     {
-        if (_disposed) throw new ObjectDisposedException(GetType().FullName);
-        if (packet == null) throw new ArgumentNullException(nameof(packet));
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(packet);
 
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _sessionCts.Token);
 
@@ -50,8 +50,9 @@ public sealed class ProtocolSession(IProtocolConnection connection, IPacketEnvel
 
     public async ValueTask CloseAsync()
     {
-        if (_disposed) throw new ObjectDisposedException(GetType().FullName);
-        _sessionCts.Cancel();
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        await _sessionCts.CancelAsync().ConfigureAwait(continueOnCapturedContext: false);
         await _connection.CloseAsync().ConfigureAwait(continueOnCapturedContext: false);
     }
 

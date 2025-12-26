@@ -2,6 +2,8 @@
 using System.ComponentModel.DataAnnotations;
 using System.Diagnostics.CodeAnalysis;
 using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -30,9 +32,26 @@ var app = appBuilder.Build();
 
 var routeBuilder = app.Services.GetRequiredService<IProtocolRouteBuilder>();
 
-routeBuilder.MapProtocol(async (IProtocolSession session, LoginResponse response, ILogger<Program> logger, CancellationToken cancellationToken) =>
+routeBuilder.MapProtocol((IProtocolSession session, EchoResponse _, ILogger<Program> logger, CancellationToken cancellationToken) =>
 {
-    logger.LogLogin(LogLevel.Information, response.Success);
+    logger.LogEcho(LogLevel.Information);
+    return Task.CompletedTask;
+});
+
+app.Services.GetRequiredService<IHostApplicationLifetime>().ApplicationStarted.Register(async () =>
+{
+    var options = app.Services.GetRequiredService<IOptions<ProgramOptions>>().Value;
+    var loginUri = new Uri($"http://{options.Host}:{options.Port}/api/login");
+    using var loginContent = JsonContent.Create(new { account = "player1", password = "password" });
+    using var httpClient = new HttpClient();
+    var response = await httpClient.PostAsync(loginUri, loginContent).ConfigureAwait(ConfigureAwaitOptions.None);
+    response.EnsureSuccessStatusCode();
+    var jsonObject = await response.Content.ReadFromJsonAsync<JsonObject>();
+    var token = jsonObject!["token"]!.GetValue<string>();
+
+    var clientFactory = app.Services.GetRequiredService<IProtocolClientFactory>();
+    var client = await clientFactory.ConnectAsync(options.Host, options.Port, token);
+    var session = client.ProtocolSession;
 
     if (session.Properties.TryGetValue("Echo", out var exists))
     {
@@ -44,20 +63,6 @@ routeBuilder.MapProtocol(async (IProtocolSession session, LoginResponse response
     var cts = CancellationTokenSource.CreateLinkedTokenSource(session.SessionClosed);
     var task = EchoAsync(session, cts.Token);
     session.Properties["Echo"] = (cts, task);
-});
-
-routeBuilder.MapProtocol((IProtocolSession session, EchoResponse _, ILogger<Program> logger, CancellationToken cancellationToken) =>
-{
-    logger.LogEcho(LogLevel.Information);
-    return Task.CompletedTask;
-});
-
-app.Services.GetRequiredService<IHostApplicationLifetime>().ApplicationStarted.Register(async () =>
-{
-    var clientFactory = app.Services.GetRequiredService<IProtocolClientFactory>();
-    var options = app.Services.GetRequiredService<IOptions<ProgramOptions>>().Value;
-    var client = await clientFactory.ConnectAsync(options.Host, options.Port);
-    await client.SendAsync(new LoginRequest("overing", "abc123"));
 });
 
 await app.RunAsync();

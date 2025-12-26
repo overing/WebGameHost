@@ -11,15 +11,15 @@ public sealed class JsonPayloadSerializer(JsonSerializerOptions? options) : IPay
 
     public byte[] Serialize(object packet, Type type)
     {
-        if (packet == null) throw new ArgumentNullException(nameof(packet));
-        if (type == null) throw new ArgumentNullException(nameof(type));
+        ArgumentNullException.ThrowIfNull(packet);
+        ArgumentNullException.ThrowIfNull(type);
 
         return JsonSerializer.SerializeToUtf8Bytes(packet, type, _options);
     }
 
     public object Deserialize(ReadOnlySpan<byte> data, Type targetType)
     {
-        if (targetType == null) throw new ArgumentNullException(nameof(targetType));
+        ArgumentNullException.ThrowIfNull(targetType);
 
         return JsonSerializer.Deserialize(data, targetType, _options)
             ?? throw new FormatException($"Deserialization returned null for type {targetType}");
