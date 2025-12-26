@@ -9,7 +9,7 @@ using ProtocolFramework.Core.Serialization;
 
 namespace ProtocolFramework.Core;
 
-public interface IProtocolClient : IDisposable
+public interface IProtocolClient : IDisposable, IAsyncDisposable
 {
     IProtocolSession ProtocolSession { get; }
     CancellationToken ConnectionClosed { get; }
@@ -90,6 +90,12 @@ internal sealed class ProtocolClient(
     }
 
     public void Dispose() => _session.Dispose();
+
+    public async ValueTask DisposeAsync()
+    {
+        await DisconnectAsync().ConfigureAwait(false);
+        _session.Dispose();
+    }
 }
 
 internal static partial class ProtocolClientLoggerExtensions
@@ -113,13 +119,11 @@ public interface IProtocolClientFactory
 [SuppressMessage("Performance", "CA1812", Justification = "This class is instantiated via DI")]
 internal sealed class WebSocketProtocolClientFactory(
     IServiceProvider serviceProvider,
-    IProtocolRouteBuilder protocolRouteBuilder,
-    IPacketEnvelopeCodec codec)
+    IProtocolRouteBuilder protocolRouteBuilder)
     : IProtocolClientFactory
 {
     private readonly IServiceProvider _serviceProvider = serviceProvider;
     private readonly IProtocolRouteBuilder _protocolRouteBuilder = protocolRouteBuilder;
-    private readonly IPacketEnvelopeCodec _codec = codec;
 
     public async Task<IProtocolClient> ConnectAsync(
         string address,
@@ -140,7 +144,6 @@ internal sealed class WebSocketProtocolClientFactory(
 
             var stream = WebSocketStream.Create(socket, WebSocketMessageType.Binary, ownsWebSocket: true);
             var connection = new StreamProtocolConnection(stream);
-            var session = new ProtocolSession(connection, _codec);
 #pragma warning restore CA2000 // Dispose objects before losing scope
 
             var builder = _protocolRouteBuilder;

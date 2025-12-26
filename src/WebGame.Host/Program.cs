@@ -1,15 +1,14 @@
 
-using System.Collections.Concurrent;
+using System.ComponentModel.DataAnnotations;
 using System.Diagnostics.CodeAnalysis;
 using System.IdentityModel.Tokens.Jwt;
-using System.Net.WebSockets;
 using System.Security.Claims;
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using ProtocolFramework.Core;
-using ProtocolFramework.Core.Serialization;
 using ProtocolFramework.Host;
 using WebGame.Core.Protocols;
 
@@ -22,60 +21,18 @@ appBuilder.Logging.ClearProviders()
 
 appBuilder.Services.AddOpenApi();
 
+appBuilder.AddAspNetCoreProtocolHost(options => options.RegisterAssembly(typeof(EchoRequest).Assembly));
+appBuilder.Services
+    .AddSingleton<JwtService>()
+    .AddOptions<JwtOptions>()
+    .BindConfiguration(JwtOptions.SectionName)
+    .ValidateDataAnnotations();
+
+appBuilder.Services.AddSingleton<IConfigureOptions<JwtBearerOptions>, JwtBearerOptionsSetup>();
+
 appBuilder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options =>
-    {
-        options.TokenValidationParameters = new TokenValidationParameters
-        {
-            ValidateIssuer = true,
-            ValidateAudience = true,
-            ValidateLifetime = true,
-            ValidateIssuerSigningKey = true,
-            ValidIssuer = "your-issuer",
-            ValidAudience = "your-audience",
-            IssuerSigningKeys = [new SymmetricSecurityKey(Encoding.UTF8.GetBytes("your-secret-key-at-least-32-chars"))],
-            // IssuerSigningKeyResolver = (token, securityToken, kid, parameters) =>
-            // {
-            //     return [parameters.IssuerSigningKey];
-            // }
-        };
-
-        options.Events = new JwtBearerEvents
-        {
-            OnMessageReceived = context =>
-            {
-                var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
-                var accessToken = context.Request.Query["access_token"];
-                var path = context.HttpContext.Request.Path;
-
-                if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/ws", StringComparison.OrdinalIgnoreCase))
-                {
-                    // logger.LogInformation($"Path: {path}, Set token: {accessToken}");
-                    context.Token = accessToken;
-                }
-
-                return Task.CompletedTask;
-            },
-
-            OnAuthenticationFailed = context =>
-            {
-                var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
-                logger.LogAuthenticationFailed(LogLevel.Error, context.Exception);
-                return Task.CompletedTask;
-            },
-
-            OnTokenValidated = context =>
-            {
-                var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
-                logger.LogTokenValidated(LogLevel.Information, context.Principal?.Identity?.Name!);
-                return Task.CompletedTask;
-            }
-        };
-    });
-
-appBuilder.AddAspNetCoreProtocolHost(options => options.RegisterAssembly(typeof(EchoRequest).Assembly));
-appBuilder.Services.AddSingleton<JwtService>();
+    .AddJwtBearer();
 
 var app = appBuilder.Build();
 
@@ -85,6 +42,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseWebSockets();
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.MapGet("/", (HttpContext httpContext) => TypedResults.Ok(new
 {
@@ -144,10 +103,28 @@ internal static partial class ProgramLoggerExtensions
     public static partial void LogEcho(this ILogger logger, LogLevel logLevel);
 }
 
-[SuppressMessage("Performance", "CA1812", Justification = "This class is instantiated via DI")]
-internal sealed class JwtService
+
+internal sealed class JwtOptions
 {
-    private readonly string _key = "your-secret-key-at-least-32-chars";
+    public const string SectionName = "Jwt";
+
+    [Required]
+    [MinLength(32)]
+    public required string SecretKey { get; init; } = "your-secret-key-at-least-32-chars";
+
+    [Required]
+    public required string Issuer { get; init; } = "your-issuer";
+
+    [Required]
+    public required string Audience { get; init; } = "your-audience";
+
+    public int ExpirationMinutes { get; init; } = 24 * 60;
+}
+
+[SuppressMessage("Performance", "CA1812", Justification = "This class is instantiated via DI")]
+internal sealed class JwtService(IOptions<JwtOptions> options)
+{
+    private readonly JwtOptions _options = options.Value;
 
     public string GenerateToken(string userId)
     {
@@ -157,16 +134,73 @@ internal sealed class JwtService
             new Claim(ClaimTypes.Name, userId)
         };
 
-        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_key));
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_options.SecretKey));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
         var token = new JwtSecurityToken(
-            issuer: "your-issuer",
-            audience: "your-audience",
+            issuer: _options.Issuer,
+            audience: _options.Audience,
             claims: claims,
-            expires: DateTime.UtcNow.AddHours(24),
+            expires: DateTime.UtcNow.AddMinutes(_options.ExpirationMinutes),
             signingCredentials: creds);
 
         return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+}
+
+internal sealed class JwtBearerOptionsSetup(IOptions<JwtOptions> jwtOptions) : IConfigureNamedOptions<JwtBearerOptions>
+{
+    private readonly JwtOptions _jwtOptions = jwtOptions.Value;
+
+    public void Configure(string? name, JwtBearerOptions options)
+    {
+        if (name != JwtBearerDefaults.AuthenticationScheme) return;
+        Configure(options);
+    }
+
+    public void Configure(JwtBearerOptions options)
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = _jwtOptions.Issuer,
+            ValidAudience = _jwtOptions.Audience,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtOptions.SecretKey))
+        };
+
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
+                var accessToken = context.Request.Query["access_token"];
+                var path = context.HttpContext.Request.Path;
+
+                if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/ws", StringComparison.OrdinalIgnoreCase))
+                {
+                    // logger.LogInformation($"Path: {path}, Set token: {accessToken}");
+                    context.Token = accessToken;
+                }
+
+                return Task.CompletedTask;
+            },
+
+            OnAuthenticationFailed = context =>
+            {
+                var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
+                logger.LogAuthenticationFailed(LogLevel.Error, context.Exception);
+                return Task.CompletedTask;
+            },
+
+            OnTokenValidated = context =>
+            {
+                var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
+                logger.LogTokenValidated(LogLevel.Information, context.Principal?.Identity?.Name!);
+                return Task.CompletedTask;
+            }
+        };
     }
 }

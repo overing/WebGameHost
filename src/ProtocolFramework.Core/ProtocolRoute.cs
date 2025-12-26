@@ -21,12 +21,10 @@ internal sealed record class ProtocolMeta
     }
 }
 
-internal sealed class InvocationContext
-{
-    public IProtocolSession Session { get; set; } = default!;
-    public IServiceProvider ServiceProvider { get; set; } = default!;
-    public CancellationToken CancellationToken { get; set; }
-}
+internal readonly record struct InvocationContext(
+    IProtocolSession Session,
+    IServiceProvider ServiceProvider,
+    CancellationToken CancellationToken);
 
 public interface IProtocolRouteBuilder
 {
@@ -215,7 +213,10 @@ public sealed class ProtocolRoute
         var envelope = _codec.Decode(data);
 
         if (!_mapping.TryGetValue(envelope.TypeName, out var meta))
+        {
+            _logger.LogProtocolUnhandle(LogLevel.Warning, envelope.TypeName, session.SessionId);
             return;
+        }
 
         var stampBeginDeserialize = Stopwatch.GetTimestamp();
         var packet = _serializer.Deserialize(envelope.PayloadSpan, meta.PacketType);
@@ -238,6 +239,9 @@ public sealed class ProtocolRoute
 
 internal static partial class ProtocolRouteLoggerExtensions
 {
+    [LoggerMessage("{TypeName}, session#{SessionId}, unhandle")]
+    public static partial void LogProtocolUnhandle(this ILogger logger, LogLevel logLevel, string typeName, string sessionId);
+
     [LoggerMessage("{PacketType}, session#{SessionId}, deserialize: {ElapsedDeserializeMs:N3}ms, invoke: {ElapsedInvokeMs:N3}ms")]
     public static partial void LogProtocolElapsed(this ILogger logger, LogLevel logLevel, Type packetType, string sessionId, double elapsedDeserializeMs, double elapsedInvokeMs);
 }

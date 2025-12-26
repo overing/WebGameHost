@@ -1,4 +1,5 @@
 
+using System.Buffers;
 using ProtocolFramework.Core.Serialization;
 
 namespace ProtocolFramework.Core;
@@ -33,17 +34,20 @@ public sealed class ProtocolSession(IProtocolConnection connection, IPacketEnvel
 
         var payload = _codec.Encode(packet);
 
-        var buffer = new byte[sizeof(int) + payload.Length];
-        BitConverter.TryWriteBytes(buffer.AsSpan(0, sizeof(int)), payload.Length);
-        payload.CopyTo(buffer.AsSpan(sizeof(int)));
-
         await _writeLock.WaitAsync(linkedCts.Token).ConfigureAwait(continueOnCapturedContext: false);
+
+        var buffer = ArrayPool<byte>.Shared.Rent(sizeof(int) + payload.Length);
         try
         {
+            BitConverter.TryWriteBytes(buffer.AsSpan(0, sizeof(int)), payload.Length);
+            payload.CopyTo(buffer.AsSpan(sizeof(int)));
+
             await _connection.WriteAsync(buffer, linkedCts.Token).ConfigureAwait(continueOnCapturedContext: false);
         }
         finally
         {
+            ArrayPool<byte>.Shared.Return(buffer);
+
             _writeLock.Release();
         }
     }

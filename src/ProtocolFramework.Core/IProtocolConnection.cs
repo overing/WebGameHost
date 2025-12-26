@@ -27,3 +27,9 @@ public interface IProtocolWriter
 {
     ValueTask WriteAsync(ReadOnlyMemory<byte> source, CancellationToken cancellationToken = default);
 }
+
+public interface IProtocolErrorHandler
+{
+    ValueTask OnUnknownPacketAsync(string typeName, IProtocolSession session);
+    ValueTask OnHandlerExceptionAsync(Exception exception, object packet, IProtocolSession session);
+}
