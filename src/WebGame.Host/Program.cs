@@ -1,18 +1,16 @@
 
 using System.ComponentModel.DataAnnotations;
 using System.Diagnostics.CodeAnalysis;
-using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 using ProtocolFramework.Core;
 using ProtocolFramework.Host;
 using WebGame.Core.Protocols;
-
-Microsoft.IdentityModel.Logging.IdentityModelEventSource.ShowPII = true;
 
 var appBuilder = WebApplication.CreateBuilder(args);
 
@@ -25,8 +23,9 @@ appBuilder.AddAspNetCoreProtocolHost(options => options.RegisterAssembly(typeof(
 appBuilder.Services
     .AddSingleton<JwtService>()
     .AddOptions<JwtOptions>()
-    .BindConfiguration(JwtOptions.SectionName)
-    .ValidateDataAnnotations();
+    .BindConfiguration(nameof(JwtOptions))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
 
 appBuilder.Services.AddSingleton<IConfigureOptions<JwtBearerOptions>, JwtBearerOptionsSetup>();
 
@@ -42,8 +41,6 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseWebSockets();
-app.UseAuthentication();
-app.UseAuthorization();
 
 app.MapGet("/", (HttpContext httpContext) => TypedResults.Ok(new
 {
@@ -85,7 +82,7 @@ app.Map("/ws", async (HttpContext httpContext, [FromServices] IWebSocketConnecti
 
 app.MapProtocol(async (IProtocolSession session, EchoRequest request, ILogger<Program> logger) =>
 {
-    logger.LogEcho(LogLevel.Information);
+    // logger.LogEcho(LogLevel.Information);
     await session.SendAsync(new EchoResponse());
 });
 
@@ -103,51 +100,50 @@ internal static partial class ProgramLoggerExtensions
     public static partial void LogEcho(this ILogger logger, LogLevel logLevel);
 }
 
-
+[SuppressMessage("Performance", "CA1812", Justification = "This class is instantiated via DI")]
 internal sealed class JwtOptions
 {
-    public const string SectionName = "Jwt";
-
     [Required]
     [MinLength(32)]
-    public required string SecretKey { get; init; } = "your-secret-key-at-least-32-chars";
+    public required string SecretKey { get; init; }
 
     [Required]
-    public required string Issuer { get; init; } = "your-issuer";
+    public required string Issuer { get; init; }
 
     [Required]
-    public required string Audience { get; init; } = "your-audience";
+    public required string Audience { get; init; }
 
-    public int ExpirationMinutes { get; init; } = 24 * 60;
+    [Range(1, 4320)]
+    public int ExpirationMinutes { get; init; }
 }
 
 [SuppressMessage("Performance", "CA1812", Justification = "This class is instantiated via DI")]
 internal sealed class JwtService(IOptions<JwtOptions> options)
 {
     private readonly JwtOptions _options = options.Value;
+    private readonly JsonWebTokenHandler _handler = new();
 
     public string GenerateToken(string userId)
     {
-        var claims = new[]
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_options.SecretKey));
+        var descriptor = new SecurityTokenDescriptor
         {
-            new Claim(ClaimTypes.NameIdentifier, userId),
-            new Claim(ClaimTypes.Name, userId)
+            Subject = new ClaimsIdentity(
+            [
+                new Claim(ClaimTypes.NameIdentifier, userId),
+                new Claim(ClaimTypes.Name, userId)
+            ]),
+            Issuer = _options.Issuer,
+            Audience = _options.Audience,
+            Expires = DateTime.UtcNow.AddMinutes(_options.ExpirationMinutes),
+            SigningCredentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256)
         };
 
-        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_options.SecretKey));
-        var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-
-        var token = new JwtSecurityToken(
-            issuer: _options.Issuer,
-            audience: _options.Audience,
-            claims: claims,
-            expires: DateTime.UtcNow.AddMinutes(_options.ExpirationMinutes),
-            signingCredentials: creds);
-
-        return new JwtSecurityTokenHandler().WriteToken(token);
+        return _handler.CreateToken(descriptor);
     }
 }
 
+[SuppressMessage("Performance", "CA1812", Justification = "This class is instantiated via DI")]
 internal sealed class JwtBearerOptionsSetup(IOptions<JwtOptions> jwtOptions) : IConfigureNamedOptions<JwtBearerOptions>
 {
     private readonly JwtOptions _jwtOptions = jwtOptions.Value;

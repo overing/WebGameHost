@@ -9,14 +9,6 @@ public sealed class JsonPayloadSerializer(JsonSerializerOptions? options) : IPay
 
     public JsonPayloadSerializer() : this(null) { }
 
-    public byte[] Serialize(object packet, Type type)
-    {
-        ArgumentNullException.ThrowIfNull(packet);
-        ArgumentNullException.ThrowIfNull(type);
-
-        return JsonSerializer.SerializeToUtf8Bytes(packet, type, _options);
-    }
-
     public object Deserialize(ReadOnlySpan<byte> data, Type targetType)
     {
         ArgumentNullException.ThrowIfNull(targetType);

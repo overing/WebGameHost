@@ -56,7 +56,7 @@ internal sealed class WebSocketConnectionManager(
 #pragma warning disable CA1031 // Do not catch general exception types
             try
             {
-                await session.SendAsync(packet).ConfigureAwait(ConfigureAwaitOptions.None);
+                await session.SendAsync(packet).ConfigureAwait(continueOnCapturedContext: false);
             }
             catch
             {

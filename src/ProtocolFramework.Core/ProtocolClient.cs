@@ -1,7 +1,5 @@
 
 using System.Diagnostics.CodeAnalysis;
-using System.Net.Http.Json;
-using System.Net.Sockets;
 using System.Net.WebSockets;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -14,8 +12,8 @@ public interface IProtocolClient : IDisposable, IAsyncDisposable
     IProtocolSession ProtocolSession { get; }
     CancellationToken ConnectionClosed { get; }
     void StartProcessReceive(CancellationToken cancellationToken = default);
-    Task SendAsync<TPacket>(TPacket packet, CancellationToken cancellationToken = default) where TPacket : class;
-    Task DisconnectAsync();
+    ValueTask SendAsync<TPacket>(TPacket packet, CancellationToken cancellationToken = default) where TPacket : class;
+    ValueTask DisconnectAsync();
 }
 
 [SuppressMessage("Performance", "CA1812", Justification = "This class is instantiated via DI")]
@@ -68,10 +66,10 @@ internal sealed class ProtocolClient(
         // }
     }
 
-    public Task SendAsync<TPacket>(TPacket packet, CancellationToken cancellationToken = default) where TPacket : class
+    public ValueTask SendAsync<TPacket>(TPacket packet, CancellationToken cancellationToken = default) where TPacket : class
         => _session.SendAsync(packet, cancellationToken);
 
-    public async Task DisconnectAsync()
+    public async ValueTask DisconnectAsync()
     {
         await _session.CloseAsync().ConfigureAwait(false);
 

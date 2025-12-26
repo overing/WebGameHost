@@ -8,7 +8,7 @@ public interface IProtocolSession
 {
     string SessionId { get; }
     CancellationToken SessionClosed { get; }
-    Task SendAsync<TPacket>(TPacket packet, CancellationToken cancellationToken = default) where TPacket : class;
+    ValueTask SendAsync<TPacket>(TPacket packet, CancellationToken cancellationToken = default) where TPacket : class;
     ValueTask CloseAsync();
     IDictionary<string, object> Properties { get; }
 }
@@ -25,7 +25,7 @@ public sealed class ProtocolSession(IProtocolConnection connection, IPacketEnvel
     public IDictionary<string, object> Properties { get; } = new Dictionary<string, object>();
     public CancellationToken SessionClosed => _sessionCts.Token;
 
-    public async Task SendAsync<TPacket>(TPacket packet, CancellationToken cancellationToken = default) where TPacket : class
+    public async ValueTask SendAsync<TPacket>(TPacket packet, CancellationToken cancellationToken = default) where TPacket : class
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(packet);
@@ -34,20 +34,25 @@ public sealed class ProtocolSession(IProtocolConnection connection, IPacketEnvel
 
         var payload = _codec.Encode(packet);
 
-        await _writeLock.WaitAsync(linkedCts.Token).ConfigureAwait(continueOnCapturedContext: false);
-
-        var buffer = ArrayPool<byte>.Shared.Rent(sizeof(int) + payload.Length);
+        await _writeLock.WaitAsync(linkedCts.Token).ConfigureAwait(false);
         try
         {
-            BitConverter.TryWriteBytes(buffer.AsSpan(0, sizeof(int)), payload.Length);
-            payload.CopyTo(buffer.AsSpan(sizeof(int)));
+            var buffer = ArrayPool<byte>.Shared.Rent(sizeof(int) + payload.Length);
+            try
+            {
+                BitConverter.TryWriteBytes(buffer.AsSpan(0, sizeof(int)), payload.Length);
+                payload.CopyTo(buffer.AsSpan(sizeof(int)));
 
-            await _connection.WriteAsync(buffer, linkedCts.Token).ConfigureAwait(continueOnCapturedContext: false);
+                await _connection.WriteAsync(buffer.AsMemory(0, sizeof(int) + payload.Length), linkedCts.Token)
+                    .ConfigureAwait(false);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(buffer);
+            }
         }
         finally
         {
-            ArrayPool<byte>.Shared.Return(buffer);
-
             _writeLock.Release();
         }
     }

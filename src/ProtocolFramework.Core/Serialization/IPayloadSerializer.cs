@@ -7,11 +7,6 @@ namespace ProtocolFramework.Core.Serialization;
 public interface IPayloadSerializer
 {
     /// <summary>
-    /// 序列化物件
-    /// </summary>
-    byte[] Serialize(object packet, Type type);
-
-    /// <summary>
     /// 反序列化物件
     /// </summary>
     object Deserialize(ReadOnlySpan<byte> data, Type targetType);
