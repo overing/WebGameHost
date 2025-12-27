@@ -12,15 +12,15 @@ public sealed class StreamProtocolConnection(Stream stream) : IProtocolConnectio
 
     public async ValueTask WriteAsync(ReadOnlyMemory<byte> source, CancellationToken cancellationToken = default)
     {
-        await _stream.WriteAsync(source, cancellationToken).ConfigureAwait(false);
-        await _stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        await _stream.WriteAsync(source, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
+        await _stream.FlushAsync(cancellationToken).ConfigureAwait(ConfigureAwaitOptions.None);
     }
 
     public async ValueTask<ReadOnlyMemory<byte>> ReadAsync(CancellationToken cancellationToken = default)
     {
         while (true)
         {
-            var result = await _reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+            var result = await _reader.ReadAsync(cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
             var buffer = result.Buffer;
 
             if (TryReadPacket(ref buffer, out var packet))
@@ -46,8 +46,8 @@ public sealed class StreamProtocolConnection(Stream stream) : IProtocolConnectio
 
     public async ValueTask CloseAsync()
     {
-        await _cts.CancelAsync().ConfigureAwait(false);
-        await _reader.CompleteAsync().ConfigureAwait(false);
+        await _cts.CancelAsync().ConfigureAwait(ConfigureAwaitOptions.None);
+        await _reader.CompleteAsync().ConfigureAwait(continueOnCapturedContext: false);
         _stream.Close();
     }
 
@@ -56,9 +56,9 @@ public sealed class StreamProtocolConnection(Stream stream) : IProtocolConnectio
         if (_disposed) return;
         _disposed = true;
 
-        await _cts.CancelAsync().ConfigureAwait(false);
-        await _reader.CompleteAsync().ConfigureAwait(false);
-        await _stream.DisposeAsync().ConfigureAwait(false);
+        await _cts.CancelAsync().ConfigureAwait(ConfigureAwaitOptions.None);
+        await _reader.CompleteAsync().ConfigureAwait(continueOnCapturedContext: false);
+        await _stream.DisposeAsync().ConfigureAwait(continueOnCapturedContext: false);
         _cts.Dispose();
     }
 

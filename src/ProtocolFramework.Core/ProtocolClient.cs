@@ -22,7 +22,8 @@ internal sealed class ProtocolClient(
     IServiceScopeFactory serviceScopeFactory,
     IProtocolConnection connection,
     IPacketEnvelopeCodec packetEnvelopeCodec,
-    IProtocolRouteBuilder protocolRouteBuilder)
+    IProtocolRouteBuilder protocolRouteBuilder,
+    IProtocolErrorHandler? errorHandler = null)
     : IProtocolClient
 {
     private readonly ILogger _logger = logger;
@@ -30,6 +31,7 @@ internal sealed class ProtocolClient(
     private readonly IProtocolConnection _connection = connection;
     private readonly ProtocolSession _session = new(connection, packetEnvelopeCodec);
     private readonly ProtocolConnectionProcessor _processor = new(protocolRouteBuilder);
+    private readonly IProtocolErrorHandler? _errorHandler = errorHandler;
     private Task? _receiveTask;
 
     public IProtocolSession ProtocolSession => _session;
@@ -53,6 +55,7 @@ internal sealed class ProtocolClient(
                     _connection,
                     _session,
                     _serviceScopeFactory,
+                    _errorHandler,
                     cancellationToken)
                 .ConfigureAwait(continueOnCapturedContext: false);
         }
@@ -73,27 +76,27 @@ internal sealed class ProtocolClient(
 
     public async ValueTask DisconnectAsync()
     {
-        await _session.CloseAsync().ConfigureAwait(false);
+        await _session.CloseAsync().ConfigureAwait(continueOnCapturedContext: false);
 
         if (_receiveTask is { } task)
         {
             try
             {
-                await task.ConfigureAwait(false);
+                await task.ConfigureAwait(ConfigureAwaitOptions.None);
             }
             catch (OperationCanceledException)
             {
             }
         }
 
-        await _connection.CloseAsync().ConfigureAwait(false);
+        await _connection.CloseAsync().ConfigureAwait(continueOnCapturedContext: false);
     }
 
     public void Dispose() => _session.Dispose();
 
     public async ValueTask DisposeAsync()
     {
-        await DisconnectAsync().ConfigureAwait(false);
+        await DisconnectAsync().ConfigureAwait(continueOnCapturedContext: false);
         _session.Dispose();
     }
 }
@@ -170,9 +173,9 @@ internal sealed class WebSocketProtocolClientFactory(
         finally
         {
             if (connection is not null)
-                await connection.DisposeAsync().ConfigureAwait(false);
+                await connection.DisposeAsync().ConfigureAwait(continueOnCapturedContext: false);
             else if (stream is not null)
-                await stream.DisposeAsync().ConfigureAwait(false);
+                await stream.DisposeAsync().ConfigureAwait(continueOnCapturedContext: false);
             
             socket?.Dispose();
         }

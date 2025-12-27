@@ -14,6 +14,13 @@ public interface IProtocolSession
     IDictionary<string, object> Properties { get; }
 }
 
+public sealed class ProtocolSessionOptions
+{
+    public int MaxQueueSize { get; init; } = 5000;
+    public TimeSpan SendTimeout { get; init; } = TimeSpan.FromSeconds(30);
+    public TimeSpan DrainTimeout { get; init; } = TimeSpan.FromSeconds(5);
+}
+
 public sealed class ProtocolSession : IProtocolSession, IDisposable
 {
     private readonly IProtocolConnection _connection;
@@ -30,7 +37,10 @@ public sealed class ProtocolSession : IProtocolSession, IDisposable
     public IDictionary<string, object> Properties { get; } = new ConcurrentDictionary<string, object>();
     public CancellationToken SessionClosed => _sessionCts.Token;
 
-    public ProtocolSession(IProtocolConnection connection, IPacketEnvelopeCodec codec, ProtocolSessionOptions? options = null)
+    public ProtocolSession(
+        IProtocolConnection connection,
+        IPacketEnvelopeCodec codec,
+        ProtocolSessionOptions? options = null)
     {
         _connection = connection ?? throw new ArgumentNullException(nameof(connection));
         _codec = codec ?? throw new ArgumentNullException(nameof(codec));
@@ -47,7 +57,8 @@ public sealed class ProtocolSession : IProtocolSession, IDisposable
         _sendLoopTask = Task.Run(ProcessSendQueueAsync);
     }
 
-    public async ValueTask SendAsync<TPacket>(TPacket packet, CancellationToken cancellationToken = default) where TPacket : class
+    public async ValueTask SendAsync<TPacket>(TPacket packet, CancellationToken cancellationToken = default)
+        where TPacket : class
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(packet);
@@ -67,7 +78,7 @@ public sealed class ProtocolSession : IProtocolSession, IDisposable
             linkedCts.CancelAfter(Options.SendTimeout);
         }
 
-        await _sendQueue.Writer.WriteAsync(payload, linkedCts.Token).ConfigureAwait(false);
+        await _sendQueue.Writer.WriteAsync(payload, linkedCts.Token).ConfigureAwait(continueOnCapturedContext: false);
     }
 
     private async Task ProcessSendQueueAsync()

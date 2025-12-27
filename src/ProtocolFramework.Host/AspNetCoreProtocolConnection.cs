@@ -4,7 +4,6 @@ using System.Diagnostics.CodeAnalysis;
 using System.Net.WebSockets;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -22,13 +21,15 @@ public interface IWebSocketConnectionManager
 internal sealed class WebSocketConnectionManager(
     IServiceScopeFactory serviceScopeFactory,
     IProtocolRouteBuilder routeBuilder,
-    IPacketEnvelopeCodec codec)
+    IPacketEnvelopeCodec codec,
+    IProtocolErrorHandler? errorHandler = null)
     : IWebSocketConnectionManager
 {
     private readonly ConcurrentDictionary<string, IProtocolSession> _connections = new();
     private readonly ProtocolConnectionProcessor _processor = new(routeBuilder);
     private readonly IServiceScopeFactory _serviceScopeFactory = serviceScopeFactory;
     private readonly IPacketEnvelopeCodec _codec = codec;
+    private readonly IProtocolErrorHandler? _errorHandler = errorHandler;
 
     public async Task HandleConnectionAsync(HttpContext httpContext, string userId, WebSocket webSocket)
     {
@@ -40,7 +41,14 @@ internal sealed class WebSocketConnectionManager(
 
         try
         {
-            await _processor.ProcessPacketsAsync(connection, session, _serviceScopeFactory, httpContext.RequestAborted).ConfigureAwait(ConfigureAwaitOptions.None);
+            await _processor
+                .ProcessPacketsAsync(
+                    connection,
+                    session,
+                    _serviceScopeFactory,
+                    _errorHandler,
+                    httpContext.RequestAborted)
+                .ConfigureAwait(ConfigureAwaitOptions.None);
         }
         finally
         {
@@ -63,56 +71,6 @@ internal sealed class WebSocketConnectionManager(
                 // Ignore errors
             }
 #pragma warning restore CA1031 // Do not catch general exception types
-        }
-    }
-}
-
-[SuppressMessage("Performance", "CA1812", Justification = "This class is instantiated via DI")]
-internal sealed class AspNetCoreProtocolConnectionHandler(
-    RequestDelegate next,
-    ILogger<AspNetCoreProtocolConnectionHandler> logger,
-    IPacketEnvelopeCodec packetEnvelopeCodec,
-    IProtocolRouteBuilder routeBuilder,
-    IServiceScopeFactory serviceScopeFactory)
-{
-    private readonly RequestDelegate _next = next;
-    private readonly ILogger _logger = logger;
-    private readonly IPacketEnvelopeCodec _packetEnvelopeCodec = packetEnvelopeCodec;
-    private readonly ProtocolConnectionProcessor _processor = new ProtocolConnectionProcessor(routeBuilder);
-    private readonly IServiceScopeFactory _serviceScopeFactory = serviceScopeFactory;
-
-    [SuppressMessage("Design", "CA1031", Justification = "Unknown framework user errors")]
-    public async Task InvokeAsync(HttpContext context)
-    {
-        if (!context.WebSockets.IsWebSocketRequest)
-        {
-            await _next(context).ConfigureAwait(ConfigureAwaitOptions.None);
-            return;
-        }
-
-        var webSocket = await context.WebSockets.AcceptWebSocketAsync().ConfigureAwait(ConfigureAwaitOptions.None);
-
-        using var stream = WebSocketStream.Create(webSocket, WebSocketMessageType.Binary, ownsWebSocket: true);
-        using var connection = new StreamProtocolConnection(stream);
-        using var session = new ProtocolSession(connection, _packetEnvelopeCodec);
-
-        _logger.LogClientConnected(LogLevel.Information, session.SessionId);
-
-        try
-        {
-            var ct = context.RequestAborted;
-
-            await _processor
-                .ProcessPacketsAsync(connection, session, _serviceScopeFactory, ct)
-                .ConfigureAwait(ConfigureAwaitOptions.None);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogPacketProcessError(LogLevel.Error, ex, session.SessionId);
-        }
-        finally
-        {
-            _logger.LogClientDisconnected(LogLevel.Information, session.SessionId);
         }
     }
 }
@@ -150,17 +108,5 @@ public static class AspNetCoreProtocolHostExtensions
         builder.Services.AddSingleton<IWebSocketConnectionManager, WebSocketConnectionManager>();
 
         return builder;
-    }
-
-    public static IEndpointConventionBuilder MapProtocolWebSocket(this IEndpointRouteBuilder endpoints, string pattern)
-    {
-        ArgumentNullException.ThrowIfNull(endpoints);
-
-        var app = endpoints.CreateApplicationBuilder();
-        app.UseWebSockets();
-        app.UseMiddleware<AspNetCoreProtocolConnectionHandler>();
-
-        var pipeline = app.Build();
-        return endpoints.Map(pattern, pipeline);
     }
 }
