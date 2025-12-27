@@ -144,19 +144,14 @@ public sealed class ProtocolSession : IProtocolSession
         if (_sendLoopException is not null)
             throw new InvalidOperationException("Send loop has terminated", _sendLoopException);
 
-        var writer = new ArrayBufferWriter<byte>();
-        _codec.Encode(packet, writer);
-
-        var array = ArrayPool<byte>.Shared.Rent(writer.WrittenCount);
-        writer.WrittenSpan.CopyTo(array);
-
-        var owner = new PooledMemoryOwner(array, writer.WrittenCount);
+        var owner = _codec.Encode(packet);
         try
         {
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _sessionCts.Token);
-            if (Options.SendTimeout != Timeout.InfiniteTimeSpan && Options.SendTimeout != TimeSpan.Zero)
+            var timeout = Options.SendTimeout;
+            if (timeout != Timeout.InfiniteTimeSpan && timeout != TimeSpan.Zero)
             {
-                linkedCts.CancelAfter(Options.SendTimeout);
+                linkedCts.CancelAfter(timeout);
             }
 
             await _sendQueue.Writer.WriteAsync(owner, linkedCts.Token).ConfigureAwait(false);
@@ -366,7 +361,7 @@ internal sealed class WebSocketProtocolSessionFactory(
                 logger,
                 connection,
                 _codec,
-                _routeBuilder,
+                builder,
                 _serviceScopeFactory,
                 _errorHandler);
             session.StartProcessReceive(cancellationToken);

@@ -11,9 +11,9 @@ namespace ProtocolFramework.Core.Serialization;
 public interface IPacketEnvelopeCodec
 {
     /// <summary>
-    /// 將封包封裝為可傳輸的 byte[]
+    /// 將封包封裝為可傳輸的 IMemoryOwner<byte>
     /// </summary>
-    void Encode<T>(T packet, IBufferWriter<byte> writer) where T : class;
+    IMemoryOwner<byte> Encode<T>(T packet) where T : class;
 
     /// <summary>
     /// 解封並取得類型名稱與原始資料
@@ -40,19 +40,25 @@ internal sealed class JsonPacketEnvelopeCodec(IPacketTypeResolver typeResolver, 
 
     public JsonPacketEnvelopeCodec(IPacketTypeResolver typeResolver) : this(typeResolver, null) { }
 
-    public void Encode<T>(T packet, IBufferWriter<byte> writer) where T : class
+    public IMemoryOwner<byte> Encode<T>(T packet) where T : class
     {
         ArgumentNullException.ThrowIfNull(packet);
 
         if (!_typeResolver.TryGetTypeName(typeof(T), out var typeName))
-            throw new InvalidOperationException($"Type '{typeof(T)}' is not registered. Register it in PacketTypeResolverOptions.");
+            throw new InvalidOperationException($"Type '{typeof(T)}' is not registered.");
 
+        var writer = new ArrayBufferWriter<byte>();
         using var jsonWriter = new Utf8JsonWriter(writer);
         jsonWriter.WriteStartObject();
         jsonWriter.WriteString("TypeName"u8, typeName);
         jsonWriter.WritePropertyName("Payload"u8);
         JsonSerializer.Serialize(jsonWriter, packet, _options);
         jsonWriter.WriteEndObject();
+        jsonWriter.Flush();
+
+        var array = ArrayPool<byte>.Shared.Rent(writer.WrittenCount);
+        writer.WrittenSpan.CopyTo(array);
+        return new PooledMemoryOwner(array, writer.WrittenCount);
     }
 
     private const string TypeName = "TypeName";
