@@ -30,7 +30,7 @@ internal sealed class WebSocketConnectionManager(
     private readonly ILogger _logger = logger;
     private readonly ILoggerFactory _loggerFactory = loggerFactory;
     private readonly ConcurrentDictionary<string, IProtocolSession> _sessions = new();
-    private readonly IProtocolRouteBuilder _routeBuilder = routeBuilder;
+    private readonly Lazy<IProtocolRoute> _route = new(routeBuilder.Build);
     private readonly IServiceScopeFactory _serviceScopeFactory = serviceScopeFactory;
     private readonly IPacketEnvelopeCodec _codec = codec;
     private readonly IProtocolErrorHandler? _errorHandler = errorHandler;
@@ -45,7 +45,7 @@ internal sealed class WebSocketConnectionManager(
             logger,
             connection,
             _codec,
-            _routeBuilder,
+            _route.Value,
             _serviceScopeFactory,
             _errorHandler);
 

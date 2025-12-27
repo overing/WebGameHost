@@ -50,18 +50,16 @@ public sealed class ProtocolSession : IProtocolSession
         ILogger<ProtocolSession> logger,
         IProtocolConnection connection,
         IPacketEnvelopeCodec codec,
-        IProtocolRouteBuilder routeBuilder,
+        IProtocolRoute route,
         IServiceScopeFactory serviceScopeFactory,
         IProtocolErrorHandler? errorHandler = null,
         ProtocolSessionOptions? options = null)
     {
-        ArgumentNullException.ThrowIfNull(routeBuilder);
-
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _connection = connection ?? throw new ArgumentNullException(nameof(connection));
         _codec = codec ?? throw new ArgumentNullException(nameof(codec));
         _serviceScopeFactory = serviceScopeFactory;
-        _route = routeBuilder.Build();
+        _route = route ?? throw new ArgumentNullException(nameof(route));
         _errorHandler = errorHandler;
         Options = options ?? new ProtocolSessionOptions();
 
@@ -154,7 +152,7 @@ public sealed class ProtocolSession : IProtocolSession
                 linkedCts.CancelAfter(timeout);
             }
 
-            await _sendQueue.Writer.WriteAsync(owner, linkedCts.Token).ConfigureAwait(false);
+            await _sendQueue.Writer.WriteAsync(owner, linkedCts.Token).ConfigureAwait(continueOnCapturedContext: false);
             owner = null;
         }
         finally
@@ -185,7 +183,7 @@ public sealed class ProtocolSession : IProtocolSession
 
                             await _connection
                                 .WriteAsync(buffer.AsMemory(0, sizeof(int) + payload.Length), _sessionCts.Token)
-                                .ConfigureAwait(false);
+                                .ConfigureAwait(continueOnCapturedContext: false);
                         }
                         finally
                         {
@@ -253,15 +251,70 @@ public sealed class ProtocolSession : IProtocolSession
         if (_disposed) return;
         _disposed = true;
 
-        await CloseAsync().ConfigureAwait(false);
+        _sendQueue.Writer.TryComplete();
+
+        await _sessionCts.CancelAsync().ConfigureAwait(ConfigureAwaitOptions.None);
+
+#pragma warning disable CA1031 // Do not catch general exception types
+        try
+        {
+            await _sendLoopTask.ConfigureAwait(ConfigureAwaitOptions.None);
+        }
+        catch { /* ignore */ }
+#pragma warning restore CA1031 // Do not catch general exception types
+
+        if (_receiveTask is { } receiveTask)
+        {
+#pragma warning disable CA1031 // Do not catch general exception types
+            try
+            {
+                await receiveTask.ConfigureAwait(ConfigureAwaitOptions.None);
+            }
+            catch { /* ignore */ }
+#pragma warning restore CA1031 // Do not catch general exception types
+        }
+
+        while (_sendQueue.Reader.TryRead(out var remaining))
+            remaining.Dispose();
+
+        await _connection.CloseAsync().ConfigureAwait(continueOnCapturedContext: false);
+
         _sessionCts.Dispose();
     }
 
     public void Dispose()
     {
         if (_disposed) return;
+
+        _sendQueue.Writer.TryComplete();
+
         _sessionCts.Cancel();
+#pragma warning disable CA1031 // Do not catch general exception types
+        try
+        {
+            _sendLoopTask.GetAwaiter().GetResult();
+        }
+        catch { /* ignore */ }
+#pragma warning restore CA1031 // Do not catch general exception types
+
+        if (_receiveTask is { } receiveTask)
+        {
+#pragma warning disable CA1031 // Do not catch general exception types
+            try
+            {
+                receiveTask.GetAwaiter().GetResult();
+            }
+            catch { /* ignore */ }
+#pragma warning restore CA1031 // Do not catch general exception types
+        }
+
+        while (_sendQueue.Reader.TryRead(out var remaining))
+            remaining.Dispose();
+
+        _connection.CloseAsync().AsTask().GetAwaiter().GetResult();
+
         _sessionCts.Dispose();
+
         _disposed = true;
     }
 }
@@ -356,12 +409,13 @@ internal sealed class WebSocketProtocolSessionFactory(
                 builder = builder.Clone();
                 configRoute.Invoke(builder);
             }
+            var route = builder.Build();
 
             var session = new ProtocolSession(
                 logger,
                 connection,
                 _codec,
-                builder,
+                route,
                 _serviceScopeFactory,
                 _errorHandler);
             session.StartProcessReceive(cancellationToken);
