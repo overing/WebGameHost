@@ -264,12 +264,7 @@ internal static partial class ProtocolRouteLoggerExtensions
         string typeName,
         string sessionId);
 
-    [LoggerMessage("""
-        {PacketType}, \
-        session#{SessionId}, \
-        deserialize: {ElapsedDeserializeMs:N3}ms, \
-        invoke: {ElapsedInvokeMs:N3}ms
-        """)]
+    [LoggerMessage("{PacketType}, session#{SessionId}, deserialize: {ElapsedDeserializeMs:N3}ms, invoke: {ElapsedInvokeMs:N3}ms")]
     public static partial void LogProtocolElapsed(
         this ILogger logger,
         LogLevel logLevel,

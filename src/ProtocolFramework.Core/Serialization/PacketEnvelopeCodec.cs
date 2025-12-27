@@ -1,12 +1,38 @@
 
-using System.Text;
+using System.Buffers;
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 
 namespace ProtocolFramework.Core.Serialization;
 
-public sealed class JsonPacketEnvelopeCodec(
-    IPacketTypeResolver typeResolver,
-    JsonSerializerOptions? options)
+/// <summary>
+/// 封包封裝/解封的編解碼器
+/// </summary>
+public interface IPacketEnvelopeCodec
+{
+    /// <summary>
+    /// 將封包封裝為可傳輸的 byte[]
+    /// </summary>
+    void Encode<T>(T packet, IBufferWriter<byte> writer) where T : class;
+
+    /// <summary>
+    /// 解封並取得類型名稱與原始資料
+    /// </summary>
+    PacketEnvelope Decode(ReadOnlyMemory<byte> data);
+}
+
+/// <summary>
+/// 解封後的封包資訊
+/// </summary>
+public sealed class PacketEnvelope(string typeName, ReadOnlyMemory<byte> payload)
+{
+    private readonly ReadOnlyMemory<byte> _payload = payload;
+    public string TypeName { get; } = typeName ?? throw new ArgumentNullException(nameof(typeName));
+    public ReadOnlySpan<byte> PayloadSpan => _payload.Span;
+}
+
+[SuppressMessage("Performance", "CA1812", Justification = "This class is instantiated via DI")]
+internal sealed class JsonPacketEnvelopeCodec(IPacketTypeResolver typeResolver, JsonSerializerOptions? options)
     : IPacketEnvelopeCodec
 {
     private readonly IPacketTypeResolver _typeResolver = typeResolver ?? throw new ArgumentNullException(nameof(typeResolver));
@@ -14,24 +40,23 @@ public sealed class JsonPacketEnvelopeCodec(
 
     public JsonPacketEnvelopeCodec(IPacketTypeResolver typeResolver) : this(typeResolver, null) { }
 
-    public byte[] Encode<T>(T packet) where T : class
+    public void Encode<T>(T packet, IBufferWriter<byte> writer) where T : class
     {
         ArgumentNullException.ThrowIfNull(packet);
 
         if (!_typeResolver.TryGetTypeName(typeof(T), out var typeName))
             throw new InvalidOperationException($"Type '{typeof(T)}' is not registered. Register it in PacketTypeResolverOptions.");
 
-        var wrapper = new EnvelopeDto
-        {
-            TypeName = typeName,
-            Payload = JsonSerializer.SerializeToElement(packet, _options)
-        };
-
-        return JsonSerializer.SerializeToUtf8Bytes(wrapper, _options);
+        using var jsonWriter = new Utf8JsonWriter(writer);
+        jsonWriter.WriteStartObject();
+        jsonWriter.WriteString("TypeName"u8, typeName);
+        jsonWriter.WritePropertyName("Payload"u8);
+        JsonSerializer.Serialize(jsonWriter, packet, _options);
+        jsonWriter.WriteEndObject();
     }
 
-    private const string TypeName = nameof(EnvelopeDto.TypeName);
-    private const string Payload = nameof(EnvelopeDto.Payload);
+    private const string TypeName = "TypeName";
+    private const string Payload = "Payload";
 
     public PacketEnvelope Decode(ReadOnlyMemory<byte> data)
     {
@@ -87,11 +112,5 @@ public sealed class JsonPacketEnvelopeCodec(
             throw new FormatException($"Missing {Payload} property");
 
         return new(typeName, payload);
-    }
-
-    internal sealed class EnvelopeDto
-    {
-        public string TypeName { get; set; } = default!;
-        public JsonElement Payload { get; set; }
     }
 }

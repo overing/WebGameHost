@@ -19,14 +19,18 @@ public interface IWebSocketConnectionManager
 
 [SuppressMessage("Performance", "CA1812", Justification = "This class is instantiated via DI")]
 internal sealed class WebSocketConnectionManager(
+    ILogger<WebSocketConnectionManager> logger,
+    ILoggerFactory loggerFactory,
     IServiceScopeFactory serviceScopeFactory,
     IProtocolRouteBuilder routeBuilder,
     IPacketEnvelopeCodec codec,
     IProtocolErrorHandler? errorHandler = null)
     : IWebSocketConnectionManager
 {
-    private readonly ConcurrentDictionary<string, IProtocolSession> _connections = new();
-    private readonly ProtocolConnectionProcessor _processor = new(routeBuilder);
+    private readonly ILogger _logger = logger;
+    private readonly ILoggerFactory _loggerFactory = loggerFactory;
+    private readonly ConcurrentDictionary<string, IProtocolSession> _sessions = new();
+    private readonly IProtocolRouteBuilder _routeBuilder = routeBuilder;
     private readonly IServiceScopeFactory _serviceScopeFactory = serviceScopeFactory;
     private readonly IPacketEnvelopeCodec _codec = codec;
     private readonly IProtocolErrorHandler? _errorHandler = errorHandler;
@@ -35,31 +39,32 @@ internal sealed class WebSocketConnectionManager(
     {
         using var stream = WebSocketStream.Create(webSocket, WebSocketMessageType.Binary, ownsWebSocket: true);
         using var connection = new StreamProtocolConnection(stream);
-        using var session = new ProtocolSession(connection, _codec);
+        var logger = _loggerFactory.CreateLogger<ProtocolSession>();
 
-        _connections[userId] = session;
+        using var session = new ProtocolSession(
+            logger,
+            connection,
+            _codec,
+            _routeBuilder,
+            _serviceScopeFactory,
+            _errorHandler);
+
+        _sessions[userId] = session;
 
         try
         {
-            await _processor
-                .ProcessPacketsAsync(
-                    connection,
-                    session,
-                    _serviceScopeFactory,
-                    _errorHandler,
-                    httpContext.RequestAborted)
-                .ConfigureAwait(ConfigureAwaitOptions.None);
+            await session.RunAsync(httpContext.RequestAborted).ConfigureAwait(ConfigureAwaitOptions.None);
         }
         finally
         {
-            _connections.TryRemove(userId, out _);
-            Console.WriteLine($"User {userId} disconnected");
+            _sessions.TryRemove(userId, out _);
+            _logger.LogUserDisconnected(LogLevel.Information, userId);
         }
     }
 
     public async Task BroadcastAsync<TPacket>(TPacket packet) where TPacket : class
     {
-        foreach (var (_, session) in _connections)
+        foreach (var (_, session) in _sessions)
         {
 #pragma warning disable CA1031 // Do not catch general exception types
             try
@@ -85,6 +90,9 @@ internal static partial class ProtocolConnectionHandlerLoggerExtensions
 
     [LoggerMessage("Client disconnected: {SessionId}")]
     public static partial void LogClientDisconnected(this ILogger logger, LogLevel logLevel, string sessionId);
+
+    [LoggerMessage("User '{UserId}' disconnected")]
+    public static partial void LogUserDisconnected(this ILogger logger, LogLevel logLevel, string userId);
 }
 
 public static class AspNetCoreProtocolHostExtensions

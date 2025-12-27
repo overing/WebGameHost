@@ -1,1 +1,0 @@
-namespace ProtocolFramework.Core;

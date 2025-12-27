@@ -49,9 +49,10 @@ app.Services.GetRequiredService<IHostApplicationLifetime>().ApplicationStarted.R
     var jsonObject = await response.Content.ReadFromJsonAsync<JsonObject>();
     var token = jsonObject!["token"]!.GetValue<string>();
 
-    var clientFactory = app.Services.GetRequiredService<IProtocolClientFactory>();
-    var client = await clientFactory.ConnectAsync(options.Host, options.Port, token);
-    var session = client.ProtocolSession;
+    var sessionFactory = app.Services.GetRequiredService<IProtocolSessionFactory>();
+    var session = await sessionFactory
+        .ConnectAsync(options.Host, options.Port, token)
+        .ConfigureAwait(ConfigureAwaitOptions.None);
 
     if (session.Properties.TryGetValue("Echo", out var exists))
     {
@@ -61,8 +62,9 @@ app.Services.GetRequiredService<IHostApplicationLifetime>().ApplicationStarted.R
     }
 
     var cts = CancellationTokenSource.CreateLinkedTokenSource(session.SessionClosed);
-    var task = EchoAsync(session, cts.Token);
-    session.Properties["Echo"] = (cts, task);
+#pragma warning disable CA2025 // Do not pass 'IDisposable' instances into unawaited tasks
+    session.Properties["Echo"] = (cts, EchoAsync(session, cts.Token));
+#pragma warning restore CA2025 // Do not pass 'IDisposable' instances into unawaited tasks
 });
 
 await app.RunAsync();

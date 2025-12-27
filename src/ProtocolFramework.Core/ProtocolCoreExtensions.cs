@@ -23,7 +23,7 @@ public static class ProtocolCoreExtensions
         collection.TryAddSingleton<IPacketEnvelopeCodec, JsonPacketEnvelopeCodec>();
 
         collection.AddSingleton<IProtocolRouteBuilder, ProtocolRouteBuilder>();
-        collection.AddSingleton<IProtocolClientFactory, WebSocketProtocolClientFactory>();
+        collection.AddSingleton<IProtocolSessionFactory, WebSocketProtocolSessionFactory>();
 
         return collection;
     }
