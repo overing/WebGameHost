@@ -60,10 +60,12 @@ internal sealed class ProtocolClient(
         {
             _logger.LogSessionClosed(LogLevel.Debug, _session.SessionId);
         }
-        // catch (Exception ex)
-        // {
-        //     _logger.LogReceiveError(LogLevel.Error, ex, _session.SessionId);
-        // }
+#pragma warning disable CA1031 // 接收迴圈需要捕獲所有例外以避免未觀察的 Task 例外
+        catch (Exception ex)
+        {
+            _logger.LogReceiveError(LogLevel.Error, ex, _session.SessionId);
+        }
+#pragma warning restore CA1031
     }
 
     public ValueTask SendAsync<TPacket>(TPacket packet, CancellationToken cancellationToken = default) where TPacket : class
@@ -130,19 +132,23 @@ internal sealed class WebSocketProtocolClientFactory(
         Action<IProtocolRouteBuilder>? configRoute,
         CancellationToken cancellationToken)
     {
+        var socket = default(ClientWebSocket?);
+        var stream = default(Stream?);
+        var connection = default(StreamProtocolConnection?);
+
         try
         {
-#pragma warning disable CA2000 // Dispose objects before losing scope
-            var socket = new ClientWebSocket();
+            socket = new ClientWebSocket();
             socket.Options.KeepAliveInterval = TimeSpan.FromSeconds(20);
             socket.Options.KeepAliveTimeout = TimeSpan.FromSeconds(20);
             socket.Options.SetRequestHeader("Authorization", $"Bearer {token}");
             var wsUri = new Uri($"ws://{address}:{port}/ws?access_token={token}");
             await socket.ConnectAsync(wsUri, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
 
-            var stream = WebSocketStream.Create(socket, WebSocketMessageType.Binary, ownsWebSocket: true);
-            var connection = new StreamProtocolConnection(stream);
-#pragma warning restore CA2000 // Dispose objects before losing scope
+#pragma warning disable CA2000 // stream 所有權轉移給 connection，由 finally 統一處理
+            stream = WebSocketStream.Create(socket, WebSocketMessageType.Binary, ownsWebSocket: true);
+#pragma warning restore CA2000
+            connection = new StreamProtocolConnection(stream);
 
             var builder = _protocolRouteBuilder;
             if (configRoute is { })
@@ -154,11 +160,21 @@ internal sealed class WebSocketProtocolClientFactory(
             var client = ActivatorUtilities.CreateInstance<ProtocolClient>(_serviceProvider, connection);
             client.StartProcessReceive(cancellationToken);
 
+            // 成功後將所有權轉移給 client，清除本地引用
+            socket = null;
+            stream = null;
+            connection = null;
+
             return client;
         }
-        catch
+        finally
         {
-            throw;
+            if (connection is not null)
+                await connection.DisposeAsync().ConfigureAwait(false);
+            else if (stream is not null)
+                await stream.DisposeAsync().ConfigureAwait(false);
+            
+            socket?.Dispose();
         }
     }
 }

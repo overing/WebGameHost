@@ -33,26 +33,60 @@ public sealed class JsonPacketEnvelopeCodec(
     private const string TypeName = nameof(EnvelopeDto.TypeName);
     private const string Payload = nameof(EnvelopeDto.Payload);
 
-    public PacketEnvelope Decode(byte[] data)
+    public PacketEnvelope Decode(ReadOnlyMemory<byte> data)
     {
-        ArgumentNullException.ThrowIfNull(data);
+        if (data.IsEmpty)
+            throw new ArgumentException("Data cannot be empty", nameof(data));
 
-        using var doc = JsonDocument.Parse(data);
-        var root = doc.RootElement;
+        var reader = new Utf8JsonReader(data.Span);
 
-        if (!root.TryGetProperty(TypeName, out var typeNameElement))
+        if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject)
+            throw new FormatException("Expected JSON object");
+
+        string? typeName = null;
+        ReadOnlyMemory<byte> payload = default;
+        bool foundTypeName = false;
+        bool foundPayload = false;
+
+        while (reader.Read())
+        {
+            if (reader.TokenType == JsonTokenType.EndObject)
+                break;
+
+            if (reader.TokenType == JsonTokenType.PropertyName)
+            {
+                if (reader.ValueTextEquals("TypeName"u8))
+                {
+                    reader.Read();
+                    typeName = reader.GetString();
+                    foundTypeName = true;
+                }
+                else if (reader.ValueTextEquals("Payload"u8))
+                {
+                    reader.Read();
+                    long start = reader.TokenStartIndex;
+                    reader.Skip();
+                    long end = reader.BytesConsumed;
+
+                    int length = (int)(end - start);
+                    payload = data.Slice((int)start, length);
+                    foundPayload = true;
+                }
+                else
+                {
+                    reader.Read();
+                    reader.Skip();
+                }
+            }
+        }
+
+        if (!foundTypeName || typeName is null)
             throw new FormatException($"Missing {TypeName} property");
 
-        var typeName = typeNameElement.GetString()
-            ?? throw new FormatException($"{TypeName} is null");
-
-        if (!root.TryGetProperty(Payload, out var payloadElement))
+        if (!foundPayload)
             throw new FormatException($"Missing {Payload} property");
 
-        var payloadJson = payloadElement.GetRawText();
-        var payloadBytes = Encoding.UTF8.GetBytes(payloadJson);
-
-        return new(typeName, payloadBytes);
+        return new(typeName, payload);
     }
 
     internal sealed class EnvelopeDto

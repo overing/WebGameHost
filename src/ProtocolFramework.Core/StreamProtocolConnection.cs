@@ -3,11 +3,12 @@ using System.IO.Pipelines;
 
 namespace ProtocolFramework.Core;
 
-public sealed class StreamProtocolConnection(Stream stream) : IProtocolConnection, IDisposable
+public sealed class StreamProtocolConnection(Stream stream) : IProtocolConnection, IDisposable, IAsyncDisposable
 {
     private readonly Stream _stream = stream ?? throw new ArgumentNullException(nameof(stream));
     private readonly PipeReader _reader = PipeReader.Create(stream);
     private readonly CancellationTokenSource _cts = new();
+    private bool _disposed;
 
     public async ValueTask WriteAsync(ReadOnlyMemory<byte> source, CancellationToken cancellationToken = default)
     {
@@ -50,10 +51,26 @@ public sealed class StreamProtocolConnection(Stream stream) : IProtocolConnectio
         _stream.Close();
     }
 
+    public async ValueTask DisposeAsync()
+    {
+        if (_disposed) return;
+        _disposed = true;
+
+        await _cts.CancelAsync().ConfigureAwait(false);
+        await _reader.CompleteAsync().ConfigureAwait(false);
+        await _stream.DisposeAsync().ConfigureAwait(false);
+        _cts.Dispose();
+    }
+
     public void Dispose()
     {
+        if (_disposed) return;
+        _disposed = true;
+
+        _cts.Cancel();
+        _reader.Complete();
+        _stream.Dispose();
         _cts.Dispose();
-        (_stream as IDisposable)?.Dispose();
     }
 
     private static bool TryReadPacket(ref ReadOnlySequence<byte> buffer, out byte[] packet)

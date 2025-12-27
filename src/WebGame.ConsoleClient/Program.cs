@@ -34,7 +34,7 @@ var routeBuilder = app.Services.GetRequiredService<IProtocolRouteBuilder>();
 
 routeBuilder.MapProtocol((IProtocolSession session, EchoResponse _, ILogger<Program> logger, CancellationToken cancellationToken) =>
 {
-    logger.LogEcho(LogLevel.Information);
+    // logger.LogEcho(LogLevel.Information);
     return Task.CompletedTask;
 });
 

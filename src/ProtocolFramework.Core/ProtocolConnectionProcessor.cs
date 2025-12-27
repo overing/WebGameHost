@@ -46,7 +46,7 @@ public sealed class ProtocolConnectionProcessor(IProtocolRouteBuilder protocolRo
             using var scope = serviceScopeFactory.CreateScope();
             try
             {
-                await route.InvokeAsync(packetData.ToArray(), session, scope.ServiceProvider, token).ConfigureAwait(false);
+                await route.InvokeAsync(packetData, session, scope.ServiceProvider, token).ConfigureAwait(false);
             }
             catch (Exception)
             {

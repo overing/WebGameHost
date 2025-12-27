@@ -203,7 +203,7 @@ public sealed class ProtocolRoute
     }
 
     public async Task InvokeAsync(
-        byte[] data,
+        ReadOnlyMemory<byte> data,
         IProtocolSession session,
         IServiceProvider serviceProvider,
         CancellationToken cancellationToken = default)
