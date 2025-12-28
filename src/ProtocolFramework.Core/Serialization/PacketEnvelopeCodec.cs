@@ -2,6 +2,7 @@
 using System.Buffers;
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
+using Microsoft.Extensions.ObjectPool;
 
 namespace ProtocolFramework.Core.Serialization;
 
@@ -37,6 +38,7 @@ internal sealed class JsonPacketEnvelopeCodec(IPacketTypeResolver typeResolver, 
 {
     private readonly IPacketTypeResolver _typeResolver = typeResolver ?? throw new ArgumentNullException(nameof(typeResolver));
     private readonly JsonSerializerOptions _options = options ?? new JsonSerializerOptions();
+    private readonly ObjectPool<ArrayBufferWriter<byte>> _writerPool = ObjectPool.Create(new ArrayBufferWriterPooledObjectPolicy());
 
     public JsonPacketEnvelopeCodec(IPacketTypeResolver typeResolver) : this(typeResolver, null) { }
 
@@ -47,18 +49,26 @@ internal sealed class JsonPacketEnvelopeCodec(IPacketTypeResolver typeResolver, 
         if (!_typeResolver.TryGetTypeName(typeof(T), out var typeName))
             throw new InvalidOperationException($"Type '{typeof(T)}' is not registered.");
 
-        var writer = new ArrayBufferWriter<byte>();
-        using var jsonWriter = new Utf8JsonWriter(writer);
-        jsonWriter.WriteStartObject();
-        jsonWriter.WriteString("TypeName"u8, typeName);
-        jsonWriter.WritePropertyName("Payload"u8);
-        JsonSerializer.Serialize(jsonWriter, packet, _options);
-        jsonWriter.WriteEndObject();
-        jsonWriter.Flush();
+        var writer = _writerPool.Get();
+        try
+        {
+            using var jsonWriter = new Utf8JsonWriter(writer);
+            jsonWriter.WriteStartObject();
+            jsonWriter.WriteString("TypeName"u8, typeName);
+            jsonWriter.WritePropertyName("Payload"u8);
+            JsonSerializer.Serialize(jsonWriter, packet, _options);
+            jsonWriter.WriteEndObject();
+            jsonWriter.Flush();
 
-        var array = ArrayPool<byte>.Shared.Rent(writer.WrittenCount);
-        writer.WrittenSpan.CopyTo(array);
-        return new PooledMemoryOwner(array, writer.WrittenCount);
+            var array = ArrayPool<byte>.Shared.Rent(writer.WrittenCount);
+            writer.WrittenSpan.CopyTo(array);
+            return new PooledMemoryOwner(array, writer.WrittenCount);
+        }
+        finally
+        {
+            writer.Clear();
+            _writerPool.Return(writer);
+        }
     }
 
     private const string TypeName = "TypeName";
@@ -118,5 +128,20 @@ internal sealed class JsonPacketEnvelopeCodec(IPacketTypeResolver typeResolver, 
             throw new FormatException($"Missing {Payload} property");
 
         return new(typeName, payload);
+    }
+
+    private sealed class ArrayBufferWriterPooledObjectPolicy : PooledObjectPolicy<ArrayBufferWriter<byte>>
+    {
+        // 預設初始容量，足夠大多數封包使用
+        private const int InitialCapacity = 256;
+        
+        public override ArrayBufferWriter<byte> Create() => new(InitialCapacity);
+
+        public override bool Return(ArrayBufferWriter<byte> obj)
+        {
+            // 如果 buffer 成長太大，丟棄它以避免記憶體浪費
+            const int MaxRetainedCapacity = 64 * 1024;  // 64KB
+            return obj.Capacity <= MaxRetainedCapacity;
+        }
     }
 }

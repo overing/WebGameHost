@@ -36,12 +36,12 @@ public sealed class ProtocolSession : IProtocolSession
     private readonly IProtocolErrorHandler? _errorHandler;
     private readonly CancellationTokenSource _sessionCts = new();
     private readonly Channel<IMemoryOwner<byte>> _sendQueue;
+    private readonly ProtocolSessionOptions _options;
     private readonly Task _sendLoopTask;
     private volatile Exception? _sendLoopException;
     private Task? _receiveTask;
     private bool _disposed;
 
-    public ProtocolSessionOptions Options { get; }
     public string SessionId { get; } = Guid.NewGuid().ToString();
     public IDictionary<string, object> Properties { get; } = new ConcurrentDictionary<string, object>();
     public CancellationToken SessionClosed => _sessionCts.Token;
@@ -61,9 +61,9 @@ public sealed class ProtocolSession : IProtocolSession
         _serviceScopeFactory = serviceScopeFactory;
         _route = route ?? throw new ArgumentNullException(nameof(route));
         _errorHandler = errorHandler;
-        Options = options ?? new ProtocolSessionOptions();
+        _options = options ?? new();
 
-        _sendQueue = Channel.CreateBounded<IMemoryOwner<byte>>(new BoundedChannelOptions(Options.MaxQueueSize)
+        _sendQueue = Channel.CreateBounded<IMemoryOwner<byte>>(new BoundedChannelOptions(_options.MaxQueueSize)
         {
             FullMode = BoundedChannelFullMode.Wait,
             SingleReader = true,
@@ -146,7 +146,7 @@ public sealed class ProtocolSession : IProtocolSession
         try
         {
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _sessionCts.Token);
-            var timeout = Options.SendTimeout;
+            var timeout = _options.SendTimeout;
             if (timeout != Timeout.InfiniteTimeSpan && timeout != TimeSpan.Zero)
             {
                 linkedCts.CancelAfter(timeout);
@@ -224,7 +224,7 @@ public sealed class ProtocolSession : IProtocolSession
 
         if (drain)
         {
-            var drainTask = Task.Delay(Options.DrainTimeout);
+            var drainTask = Task.Delay(_options.DrainTimeout);
             var loopTask = _sendLoopTask;
 
             await Task.WhenAny(loopTask, drainTask).ConfigureAwait(ConfigureAwaitOptions.None);

@@ -51,7 +51,7 @@ app.MapGet("/", (HttpContext httpContext) => TypedResults.Ok(new
     httpContext.Request.Protocol,
 }));
 
-app.MapPost("/api/login", async ([FromBody] LoginRequest request, [FromServices] JwtService jwt) =>
+app.MapPost("/api/login", ([FromBody] LoginRequest request, [FromServices] JwtService jwt) =>
 {
     if (request.Account == "player1" && request.Password == "password")
     {

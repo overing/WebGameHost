@@ -2,6 +2,8 @@
 using System.Buffers;
 using System.Diagnostics.CodeAnalysis;
 using System.IO.Pipelines;
+using System.Net.Sockets;
+using System.Net.WebSockets;
 
 namespace ProtocolFramework.Core;
 
@@ -47,9 +49,22 @@ public sealed class StreamProtocolConnection(Stream stream) : IProtocolConnectio
 
     public async ValueTask<IMemoryOwner<byte>> ReadAsync(CancellationToken cancellationToken = default)
     {
-        while (true)
+        while (!cancellationToken.IsCancellationRequested)
         {
-            var result = await _reader.ReadAsync(cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
+            ReadResult result;
+            try
+            {
+                result = await _reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return EmptyMemoryOwner.Instance;
+            }
+            catch (Exception ex) when (IsConnectionClosed(ex))
+            {
+                return EmptyMemoryOwner.Instance;
+            }
+
             var buffer = result.Buffer;
 
             IMemoryOwner<byte>? packetOwner = null;
@@ -82,6 +97,10 @@ public sealed class StreamProtocolConnection(Stream stream) : IProtocolConnectio
 
         return EmptyMemoryOwner.Instance;
     }
+
+    private static bool IsConnectionClosed(Exception ex)
+        => ex is IOException or SocketException or WebSocketException
+            || ex.InnerException is not null && IsConnectionClosed(ex.InnerException);
 
     public async ValueTask CloseAsync()
     {
