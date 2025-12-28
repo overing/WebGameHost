@@ -1,6 +1,7 @@
 
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
+using System.Net.Sockets;
 using System.Net.WebSockets;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -51,15 +52,40 @@ internal sealed class WebSocketConnectionManager(
 
         _sessions[userId] = session;
 
+#pragma warning disable CA1031 // Do not catch general exception types
         try
         {
             await session.RunAsync(httpContext.RequestAborted).ConfigureAwait(ConfigureAwaitOptions.None);
+        }
+        catch (OperationCanceledException)
+        {
+            // 正常取消（httpContext.RequestAborted 或 session 關閉）
+        }
+        catch (Exception ex) when (IsExpectedDisconnection(ex))
+        {
+            // 預期中的斷線，記錄為 Debug
+            if (_logger.IsEnabled(LogLevel.Debug))
+                _logger.LogUserDisconnectedWithReason(LogLevel.Debug, userId, ex.GetType().Name);
+        }
+        catch (Exception ex)
+        {
+            // 非預期的錯誤，記錄為 Warning
+            _logger.LogUnexpectedDisconnection(LogLevel.Warning, ex, userId);
         }
         finally
         {
             _sessions.TryRemove(userId, out _);
             _logger.LogUserDisconnected(LogLevel.Information, userId);
         }
+#pragma warning restore CA1031 // Do not catch general exception types
+    }
+
+    private static bool IsExpectedDisconnection(Exception ex)
+    {
+        return ex is IOException
+            or SocketException
+            or WebSocketException
+            || ex.InnerException is not null && IsExpectedDisconnection(ex.InnerException);
     }
 
     public async Task BroadcastAsync<TPacket>(TPacket packet) where TPacket : class
@@ -91,8 +117,14 @@ internal static partial class ProtocolConnectionHandlerLoggerExtensions
     [LoggerMessage("Client disconnected: {SessionId}")]
     public static partial void LogClientDisconnected(this ILogger logger, LogLevel logLevel, string sessionId);
 
+    [LoggerMessage("User '{UserId}' disconnected ({Reason})")]
+    public static partial void LogUserDisconnectedWithReason(this ILogger logger, LogLevel logLevel, string userId, string reason);
+
     [LoggerMessage("User '{UserId}' disconnected")]
     public static partial void LogUserDisconnected(this ILogger logger, LogLevel logLevel, string userId);
+
+    [LoggerMessage("Unexpected disconnection for user '{UserId}'")]
+    public static partial void LogUnexpectedDisconnection(this ILogger logger, LogLevel logLevel, Exception exception, string userId);
 }
 
 public static class AspNetCoreProtocolHostExtensions

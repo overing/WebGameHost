@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
+using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Threading.Channels;
 using Microsoft.Extensions.DependencyInjection;
@@ -101,6 +102,11 @@ public sealed class ProtocolSession : IProtocolSession
                 _logger.LogSessionClosed(LogLevel.Debug, SessionId);
                 break;
             }
+            catch (Exception ex) when (IsExpectedDisconnection(ex))
+            {
+                _logger.LogSessionClosed(LogLevel.Debug, SessionId);
+                break;
+            }
 
             using (packetOwner)
             {
@@ -130,6 +136,15 @@ public sealed class ProtocolSession : IProtocolSession
                 }
             }
         }
+    }
+
+    private static bool IsExpectedDisconnection(Exception ex)
+    {
+        return ex is IOException
+            or SocketException
+            or WebSocketException
+            or InvalidOperationException { Message: "Incomplete message" }
+            || ex.InnerException is not null && IsExpectedDisconnection(ex.InnerException);
     }
 
     public async ValueTask SendAsync<TPacket>(TPacket packet, CancellationToken cancellationToken = default)
