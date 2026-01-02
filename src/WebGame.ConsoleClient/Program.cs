@@ -44,14 +44,15 @@ app.Services.GetRequiredService<IHostApplicationLifetime>().ApplicationStarted.R
     var loginUri = new Uri($"http://{options.Host}:{options.Port}/api/login");
     using var loginContent = JsonContent.Create(new { account = "player1", password = "password" });
     using var httpClient = new HttpClient();
-    var response = await httpClient.PostAsync(loginUri, loginContent).ConfigureAwait(ConfigureAwaitOptions.None);
+    var response = await httpClient.PostAsync(loginUri, loginContent, default).ConfigureAwait(ConfigureAwaitOptions.None);
     response.EnsureSuccessStatusCode();
-    var jsonObject = await response.Content.ReadFromJsonAsync<JsonObject>();
-    var token = jsonObject!["token"]!.GetValue<string>();
+    var jsonObject = await response.Content.ReadFromJsonAsync<JsonObject>(default);
+    var accessToken = jsonObject!["accessToken"]!.GetValue<string>();
+    var refreshToken = jsonObject!["refreshToken"]!.GetValue<string>();
 
     var sessionFactory = app.Services.GetRequiredService<IProtocolSessionFactory>();
     var session = await sessionFactory
-        .ConnectAsync(options.Host, options.Port, token)
+        .ConnectAsync(options.Host, options.Port, accessToken)
         .ConfigureAwait(ConfigureAwaitOptions.None);
 
     if (session.Properties.TryGetValue("Echo", out var exists))

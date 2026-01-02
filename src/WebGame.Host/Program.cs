@@ -1,10 +1,14 @@
 
+using System.Collections.Frozen;
 using System.ComponentModel.DataAnnotations;
 using System.Diagnostics.CodeAnalysis;
+using System.Net;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
@@ -19,11 +23,15 @@ appBuilder.Logging.ClearProviders()
 
 appBuilder.Services.AddOpenApi();
 
-appBuilder.AddAspNetCoreProtocolHost(options => options.RegisterAssembly(typeof(EchoRequest).Assembly));
+appBuilder.Services.AddMemoryCache();
+
+appBuilder.AddAspNetCoreProtocolHost(options => options.RegisterAssemblyOf<EchoRequest>());
 appBuilder.Services
-    .AddSingleton<JwtService>()
-    .AddOptions<JwtOptions>()
-    .BindConfiguration(nameof(JwtOptions))
+    .AddSingleton<UserService>();
+appBuilder.Services
+    .AddSingleton<TokenService>()
+    .AddOptions<TokenServiceOptions>()
+    .BindConfiguration(nameof(TokenServiceOptions))
     .ValidateDataAnnotations()
     .ValidateOnStart();
 
@@ -51,13 +59,28 @@ app.MapGet("/", (HttpContext httpContext) => TypedResults.Ok(new
     httpContext.Request.Protocol,
 }));
 
-app.MapPost("/api/login", ([FromBody] LoginRequest request, [FromServices] JwtService jwt) =>
+app.MapPost("/api/login", ([FromBody] LoginRequest request, [FromServices] TokenService tokenService, [FromServices] UserService userService) =>
 {
-    if (request.Account == "player1" && request.Password == "password")
+    if (userService.GetUser(request.Account, request.Password) is { } userId)
     {
-        var token = jwt.GenerateToken(request.Account);
-        return Results.Ok(new { token });
+        var accessToken = tokenService.GenerateAccessToken(userId);
+        var refreshToken = tokenService.GenerateRefreshToken(userId);
+        return Results.Ok(new LoginResponse(accessToken, refreshToken));
     }
+
+    return Results.Unauthorized();
+});
+
+app.MapPost("/api/reflash", ([FromBody] RefreshRequest request, [FromServices] TokenService tokenService) =>
+{
+    if (tokenService.GetUserIdWithAccessToken(request.AccessToken) is { } userId &&
+        tokenService.IsRefreshTokenAvailable(request.RefreshToken))
+    {
+        var accessToken = tokenService.GenerateAccessToken(userId);
+        var refreshToken = tokenService.GenerateRefreshToken(userId);
+        return Results.Ok(new RefreshResponse(accessToken, refreshToken));
+    }
+
     return Results.Unauthorized();
 });
 
@@ -65,13 +88,13 @@ app.Map("/ws", async (HttpContext httpContext, [FromServices] IWebSocketConnecti
 {
     if (!httpContext.User.Identity?.IsAuthenticated ?? true)
     {
-        httpContext.Response.StatusCode = 401;
+        httpContext.Response.StatusCode = (int)HttpStatusCode.Unauthorized;
         return;
     }
 
     if (!httpContext.WebSockets.IsWebSocketRequest)
     {
-        httpContext.Response.StatusCode = 400;
+        httpContext.Response.StatusCode = (int)HttpStatusCode.NotFound;
         return;
     }
 
@@ -101,7 +124,18 @@ internal static partial class ProgramLoggerExtensions
 }
 
 [SuppressMessage("Performance", "CA1812", Justification = "This class is instantiated via DI")]
-internal sealed class JwtOptions
+internal sealed class UserService
+{
+    private readonly FrozenDictionary<(string Account, string Password), string> _users = new Dictionary<(string, string), string>
+    {
+        [("player1", "password")] = "10001", // TODO: 先暫時用 RAM 替代資料庫
+    }.ToFrozenDictionary();
+
+    public string? GetUser(string account, string password) => _users.TryGetValue((account, password), out var userId) ? userId : null;
+}
+
+[SuppressMessage("Performance", "CA1812", Justification = "This class is instantiated via DI")]
+internal sealed class TokenServiceOptions
 {
     [Required]
     [MinLength(32)]
@@ -113,17 +147,45 @@ internal sealed class JwtOptions
     [Required]
     public required string Audience { get; init; }
 
-    [Range(1, 4320)]
-    public int ExpirationMinutes { get; init; }
+    [Range(10, 60)]
+    public int AccessTokenExpirationMinutes { get; init; }
+
+    [Range(1, 14)]
+    public int RefreshTokenExpirationDays { get; init; }
 }
 
 [SuppressMessage("Performance", "CA1812", Justification = "This class is instantiated via DI")]
-internal sealed class JwtService(IOptions<JwtOptions> options)
+internal sealed class TokenService(IOptions<TokenServiceOptions> options, IMemoryCache cache)
 {
-    private readonly JwtOptions _options = options.Value;
+    private readonly TokenServiceOptions _options = options.Value;
     private readonly JsonWebTokenHandler _handler = new();
+    private readonly IMemoryCache _cache = cache;
 
-    public string GenerateToken(string userId)
+    public string? GetUserIdWithAccessToken(string accessToken)
+    {
+        var validationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = _options.Issuer,
+            ValidAudience = _options.Audience,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_options.SecretKey))
+        };
+
+        var result = _handler.ValidateTokenAsync(accessToken, validationParameters).GetAwaiter().GetResult();
+        if (result.IsValid)
+        {
+            var jwtToken = result.SecurityToken as JsonWebToken;
+            var userId = jwtToken?.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
+            return userId;
+        }
+
+        return null;
+    }
+
+    public string GenerateAccessToken(string userId)
     {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_options.SecretKey));
         var descriptor = new SecurityTokenDescriptor
@@ -135,18 +197,30 @@ internal sealed class JwtService(IOptions<JwtOptions> options)
             ]),
             Issuer = _options.Issuer,
             Audience = _options.Audience,
-            Expires = DateTime.UtcNow.AddMinutes(_options.ExpirationMinutes),
+            Expires = DateTime.UtcNow.AddMinutes(_options.AccessTokenExpirationMinutes),
             SigningCredentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256)
         };
 
         return _handler.CreateToken(descriptor);
     }
+
+    public bool IsRefreshTokenAvailable(string refreshToken) => _cache.TryGetValue(refreshToken, out _);
+
+    public string GenerateRefreshToken(string userId)
+    {
+        var randomBytes = new byte[64];
+        using var rng = RandomNumberGenerator.Create();
+        rng.GetBytes(randomBytes);
+        var token = Convert.ToBase64String(randomBytes);
+        _cache.Set(token, userId, TimeSpan.FromDays(_options.RefreshTokenExpirationDays));
+        return token;
+    }
 }
 
 [SuppressMessage("Performance", "CA1812", Justification = "This class is instantiated via DI")]
-internal sealed class JwtBearerOptionsSetup(IOptions<JwtOptions> jwtOptions) : IConfigureNamedOptions<JwtBearerOptions>
+internal sealed class JwtBearerOptionsSetup(IOptions<TokenServiceOptions> jwtOptions) : IConfigureNamedOptions<JwtBearerOptions>
 {
-    private readonly JwtOptions _jwtOptions = jwtOptions.Value;
+    private readonly TokenServiceOptions _jwtOptions = jwtOptions.Value;
 
     public void Configure(string? name, JwtBearerOptions options)
     {

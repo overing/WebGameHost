@@ -85,6 +85,7 @@ internal sealed class WebSocketConnectionManager(
         return ex is IOException
             or SocketException
             or WebSocketException
+            or NotSupportedException
             || ex.InnerException is not null && IsExpectedDisconnection(ex.InnerException);
     }
 
