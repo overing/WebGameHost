@@ -171,30 +171,6 @@ public sealed class StreamProtocolConnection(Stream stream) : IProtocolConnectio
         return true;
     }
 
-    private sealed class PooledMemoryOwner(byte[] array, int length) : IMemoryOwner<byte>
-    {
-        private byte[]? _array = array;
-
-        public Memory<byte> Memory
-        {
-            get
-            {
-                var arr = _array;
-                ObjectDisposedException.ThrowIf(arr is null, this);
-                return new Memory<byte>(arr, 0, length);
-            }
-        }
-
-        public void Dispose()
-        {
-            var arr = Interlocked.Exchange(ref _array, null);
-            if (arr != null)
-            {
-                ArrayPool<byte>.Shared.Return(arr);
-            }
-        }
-    }
-
     private sealed class EmptyMemoryOwner : IMemoryOwner<byte>
     {
         public static readonly EmptyMemoryOwner Instance = new();

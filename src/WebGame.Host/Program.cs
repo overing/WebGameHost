@@ -71,7 +71,7 @@ app.MapPost("/api/login", ([FromBody] LoginRequest request, [FromServices] Token
     return Results.Unauthorized();
 });
 
-app.MapPost("/api/reflash", ([FromBody] RefreshRequest request, [FromServices] TokenService tokenService) =>
+app.MapPost("/api/refresh", ([FromBody] RefreshRequest request, [FromServices] TokenService tokenService) =>
 {
     if (tokenService.GetUserIdWithAccessToken(request.AccessToken) is { } userId &&
         tokenService.IsRefreshTokenAvailable(request.RefreshToken))
